@@ -3,9 +3,10 @@ import {
   ref, get, set, update, onValue, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 import {
-  assignRoles, freshDeck, executivePowerFor, vetoUnlocked,
+  assignRoles, freshDeck, executivePowerFor, vetoUnlocked, randInt,
   ineligibleChancellorCandidates, checkWin, checkExecutionWin,
 } from './game-logic.js';
+import { playSound, initSoundToggle } from './sound.js';
 
 const params = new URLSearchParams(location.search);
 const room = params.get('room');
@@ -22,6 +23,7 @@ let currentPlayers = {};
 async function main() {
   const user = await ensureSignedIn();
   myUid = user.uid;
+  initSoundToggle();
 
   if (isNew) {
     // Claim hostUid first (its rule allows creating an empty room), then
@@ -59,6 +61,9 @@ async function main() {
   });
 
   el('startBtn').addEventListener('click', startGame);
+  el('forceResolveBtn').addEventListener('click', () => {
+    forceResolveElection().catch(e => console.warn('[board] force-resolve failed:', e && e.message));
+  });
 
   // --- DEV-ONLY START: solo-testing bots. Delete this block with dev-bots.js before game night. ---
   if (new URLSearchParams(location.search).get('dev') === '1') {
@@ -93,6 +98,17 @@ async function startGame() {
   });
   updates['secret/deck'] = deck;
   updates['secret/discard'] = [];
+  // Wipe the previous game's per-round state. Once-write nodes (claims,
+  // idx choices, veto keys, votes) are keyed by roundId restarting at 0, so
+  // without this a second game in the same room would find round 0 already
+  // "claimed"/answered and wedge immediately. Parent rules grant the host
+  // wholesale deletes of these subtrees.
+  updates['secret/claims'] = null;
+  updates['secret/legislative'] = null;
+  updates['secret/executive'] = null;
+  updates['votes'] = null;
+  updates['votesCast'] = null;
+  updates['votesRevealed'] = null;
   updates['meta/playerOrder'] = playerList.map(p => p.uid);
   updates['meta/presidentUid'] = playerList[0].uid;
   updates['meta/presidentUidLast'] = null;
@@ -110,8 +126,8 @@ async function startGame() {
   updates['meta/specialElectionTarget'] = null;
   updates['meta/specialElectionReturnUid'] = null;
   updates['meta/investigatedUids'] = null;
-
   await update(ref(db, `games/${room}`), updates);
+  playSound('game-start');
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +138,7 @@ async function startGame() {
 function handlePhaseEnter(phase) {
   if (phase === 'nomination') watchForNomination();
   if (phase === 'election') watchForVotes();
-  if (phase === 'legislative_president') watchForPresidentDiscard();
+  if (phase === 'legislative_president') { watchForPresidentChoice(); watchForPresidentDiscard(); }
   if (phase === 'legislative_chancellor') { watchForChancellorEnact(); watchForVeto(); }
   if (phase === 'executive_action') watchForExecutiveAction();
 }
@@ -171,10 +187,29 @@ function watchForNomination() {
     if (!candidate) return;
     const m = await freshMeta();
     if (m.phase !== 'nomination' || (m.roundId || 0) !== entryRound) return;
+    // Server-side eligibility re-check: phones filter the nominee list, but a
+    // stale client can nominate a term-limited/dead player. Reject by clearing
+    // the candidate and staying subscribed for a corrected nomination.
+    // (Claim only after validation, so the retry isn't blocked by our claim.)
+    const order = m.playerOrder || [];
+    const aliveCount = order.filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false).length;
+    const ineligible = ineligibleChancellorCandidates({
+      lastPresidentUid: m.presidentUidLast,
+      lastChancellorUid: m.chancellorUidLast,
+      aliveCount,
+    });
+    const nominatedAlive = currentPlayers[candidate] && currentPlayers[candidate].alive !== false;
+    if (!nominatedAlive || candidate === m.presidentUid || ineligible.has(candidate)) {
+      console.warn(`[board] rejecting ineligible nominee ${candidate}, waiting for a legal one`);
+      await update(metaRef, { chancellorCandidateUid: null });
+      return;
+    }
     if (!(await claim(`nominate-${entryRound}`))) return;
     done = true;
     if (typeof unsub === 'function') unsub();
-    const roundId = (currentMeta.roundId || 0) + 1;
+    // Use the freshly-read roundId (== entryRound by the guard above), not
+    // the possibly-stale render cache.
+    const roundId = (m.roundId || 0) + 1;
     await update(metaRef, { roundId, phase: 'election' });
   });
 }
@@ -201,17 +236,45 @@ function watchForVotes() {
     const votes = votesSnap.val() || {};
     const jaCount = Object.values(votes).filter(v => v === 'ja').length;
     const majority = jaCount > alive.length / 2;
-    await resolveElection(majority);
+    await resolveElection(majority, m);
   });
 }
 
-async function resolveElection(majority) {
+// Host escape hatch for a stuck vote (a phone that never ballots would wait
+// forever). Missing ballots count as Nein. Single-flight via the same claim
+// key as the normal path, so a raced auto-resolution wins exactly once.
+async function forceResolveElection() {
+  const m = await freshMeta();
+  if (m.phase !== 'election') {
+    console.warn('[board] force-resolve ignored: not in election');
+    return;
+  }
+  const roundId = m.roundId;
+  if (!(await claim(`election-${roundId}`))) {
+    console.warn('[board] force-resolve ignored: election already claimed');
+    return;
+  }
+  await set(ref(db, `games/${room}/votesRevealed/${roundId}`), true);
+  const votesSnap = await get(ref(db, `games/${room}/votes/${roundId}`));
+  const votes = votesSnap.val() || {};
+  const aliveCount = (m.playerOrder || []).filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false).length;
+  const jaCount = Object.values(votes).filter(v => v === 'ja').length;
+  await resolveElection(jaCount > aliveCount / 2, m);
+}
+
+async function resolveElection(majority, fresh) {
+  // `fresh` is the meta snapshot re-read by the caller after the phase guard;
+  // all arithmetic below uses it (never the render cache) so increments can't
+  // be computed from stale state. Single-flight claims already serialize
+  // writers, so fresh-read-modify-write is safe without transactions.
+  const base = fresh || currentMeta;
   if (!majority) {
-    const tracker = (currentMeta.electionTracker || 0) + 1;
+    const tracker = (base.electionTracker || 0) + 1;
     if (tracker >= 3) {
-      const win = await runChaos();
+      const win = await runChaos(base);
       if (win) return;
     } else {
+      playSound('election-fail');
       await update(metaRef, { electionTracker: tracker, chancellorCandidateUid: null });
     }
     advancePresidency(false).catch(e => console.warn('[board] advance failed:', e && e.message));
@@ -219,22 +282,23 @@ async function resolveElection(majority) {
   }
 
   // Government elected.
-  const chancellorUid = currentMeta.chancellorCandidateUid;
+  const chancellorUid = base.chancellorCandidateUid;
   const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
   const roles = rolesSnap.val() || {};
   const win = checkWin({
-    liberalTrack: currentMeta.liberalTrack || 0,
-    fascistTrack: currentMeta.fascistTrack || 0,
+    liberalTrack: base.liberalTrack || 0,
+    fascistTrack: base.fascistTrack || 0,
     electedChancellorUid: chancellorUid,
     roles,
   });
   if (win) return endGame(win);
 
   const draw = await takeTiles(3);
+  playSound('election-pass');
   await update(ref(db, `games/${room}`), {
     'meta/chancellorUid': chancellorUid,
     'meta/electionTracker': 0,
-    [`secret/legislative/${currentMeta.roundId}/presidentDraw`]: draw,
+    [`secret/legislative/${base.roundId}/presidentDraw`]: draw,
     'meta/phase': 'legislative_president',
   });
 }
@@ -242,7 +306,7 @@ async function resolveElection(majority) {
 function shuffleReshuffle(arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randInt(i + 1);
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
@@ -251,12 +315,16 @@ function shuffleReshuffle(arr) {
 // Chaos (frustrated populace): top deck tile auto-enacts, tracker resets,
 // term limits forgotten. Shared by failed-election chaos and veto-at-tracker-3.
 // Returns the win object (already applied via endGame), or null to continue.
-async function runChaos() {
+// `fresh` is a post-guard meta snapshot from the caller; falls back to the
+// render cache only when called without one.
+async function runChaos(fresh) {
+  const base = fresh || currentMeta;
+  playSound('chaos');
   const drawn = await takeTiles(1);
   const tile = drawn[0];
   const trackField = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
-  const newVal = (currentMeta[trackField] || 0) + 1;
-  const fascistNow = trackField === 'fascistTrack' ? newVal : (currentMeta.fascistTrack || 0);
+  const newVal = (base[trackField] || 0) + 1;
+  const fascistNow = trackField === 'fascistTrack' ? newVal : (base.fascistTrack || 0);
   await update(ref(db, `games/${room}`), {
     [`meta/${trackField}`]: newVal,
     'meta/electionTracker': 0,
@@ -265,7 +333,7 @@ async function runChaos() {
     'meta/chancellorUidLast': null,
     'meta/vetoUnlocked': vetoUnlocked(fascistNow),
   });
-  const win = checkWin({ liberalTrack: trackField === 'liberalTrack' ? newVal : currentMeta.liberalTrack, fascistTrack: fascistNow });
+  const win = checkWin({ liberalTrack: trackField === 'liberalTrack' ? newVal : base.liberalTrack, fascistTrack: fascistNow });
   if (win) {
     await endGame(win);
     return win;
@@ -292,14 +360,34 @@ async function takeTiles(n) {
     'secret/deck': deck.slice(n),
     'secret/discard': discard,
   });
-  // Tile-conservation self-check: deck + discard + enacted must always equal
-  // the 17 physical tiles. A mismatch means a duplicate deal orphaned tiles
-  // (see freshMeta replay guards) — loud in console instead of a silent wedge.
+  // Tile-conservation self-check: deck + discard + enacted + in-hand must
+  // always equal the 17 physical tiles. A mismatch means a duplicate deal
+  // orphaned tiles (see freshMeta replay guards) — loud in console instead
+  // of a silent wedge.
   const enacted = (currentMeta.liberalTrack || 0) + (currentMeta.fascistTrack || 0);
-  if (deck.slice(n).length + discard.length + enacted !== 17) {
-    console.warn(`[tiles] conservation check failed: deck=${deck.slice(n).length} discard=${discard.length} enacted=${enacted} (want 17 total)`);
+  if (deck.slice(n).length + discard.length + enacted + tiles.length !== 17) {
+    console.warn(`[tiles] conservation check failed: deck=${deck.slice(n).length} discard=${discard.length} enacted=${enacted} inhand=${tiles.length} (want 17 total)`);
   }
   return tiles;
+}
+
+// End-of-session reshuffle (official rule): whenever fewer than 3 tiles
+// remain in the deck after a legislative session, shuffle the discard pile
+// back in. Call this after every enact and every agreed veto, so the deck
+// is always >= 3 and Policy Peek shows the honest next three tiles.
+async function reshuffleIfShort() {
+  const deckSnap = await get(ref(db, `games/${room}/secret/deck`));
+  let deck = deckSnap.val() || [];
+  if (!Array.isArray(deck)) deck = Object.values(deck);
+  if (deck.length >= 3) return;
+  const discSnap = await get(ref(db, `games/${room}/secret/discard`));
+  let discard = discSnap.val() || [];
+  if (!Array.isArray(discard)) discard = Object.values(discard);
+  if (!discard.length) return;
+  await update(ref(db, `games/${room}`), {
+    'secret/deck': shuffleReshuffle(deck.concat(discard)),
+    'secret/discard': [],
+  });
 }
 
 function nextAliveAfter(uid) {
@@ -360,6 +448,62 @@ async function advancePresidency(snapshotLasts = true) {
   await update(metaRef, updates);
 }
 
+// Phones send an index; the board resolves it against the hand it dealt and
+// performs the discard itself. Tile values from clients are never trusted —
+// a forged hand or enactment can't survive this resolution.
+const isTile = t => t === 'liberal' || t === 'fascist';
+const asTiles = v => (Array.isArray(v) ? v : Object.values(v || {}));
+
+async function appendToDiscard(extra) {
+  const discSnap = await get(ref(db, `games/${room}/secret/discard`));
+  const discard = asTiles(discSnap.val()).concat(extra);
+  await update(ref(db, `games/${room}`), { 'secret/discard': discard });
+}
+
+// President's discard choice: resolve presidentDiscardIdx against the
+// presidentDraw the board dealt, then write chancellorHand + discard.
+// idx === -1 is the short-draw pass-through (<= 1 tile, nothing to choose).
+function watchForPresidentChoice() {
+  const roundId = currentMeta.roundId;
+  let done = false;
+  let unsub = null;
+  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDiscardIdx`), async snap => {
+    if (done) return;
+    const idx = snap.val();
+    if (idx === null || idx === undefined) return;
+    const m = await freshMeta();
+    if (m.phase !== 'legislative_president' || (m.roundId || 0) !== roundId) return;
+    if (!(await claim(`preschoice-${roundId}`))) return;
+    done = true;
+    if (typeof unsub === 'function') unsub();
+    const drawSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDraw`));
+    const draw = asTiles(drawSnap.val());
+    if (!draw.length || !draw.every(isTile)) {
+      console.warn(`[board] round ${roundId}: presidentDraw missing/corrupt, ignoring choice`);
+      return;
+    }
+    if (idx === -1) {
+      if (draw.length > 1) {
+        console.warn(`[board] round ${roundId}: pass-through with ${draw.length} tiles, ignoring`);
+        return;
+      }
+      await update(ref(db, `games/${room}`), {
+        [`secret/legislative/${roundId}/chancellorHand`]: draw,
+      });
+      return;
+    }
+    if (!Number.isInteger(idx) || idx < 0 || idx >= draw.length) {
+      console.warn(`[board] round ${roundId}: presidentDiscardIdx ${idx} out of range, ignoring`);
+      return;
+    }
+    const remaining = draw.filter((_, i) => i !== idx);
+    await appendToDiscard([draw[idx]]);
+    await update(ref(db, `games/${room}`), {
+      [`secret/legislative/${roundId}/chancellorHand`]: remaining,
+    });
+  });
+}
+
 function watchForPresidentDiscard() {
   const roundId = currentMeta.roundId;
   let done = false;
@@ -379,29 +523,45 @@ function watchForChancellorEnact() {
   const roundId = currentMeta.roundId;
   let done = false;
   let unsub = null;
-  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/enactedTile`), async snap => {
+  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorEnactIdx`), async snap => {
     if (done) return;
-    const tile = snap.val();
-    if (!tile) return;
+    const idx = snap.val();
+    if (idx === null || idx === undefined) return;
     const m = await freshMeta();
     if (m.phase !== 'legislative_chancellor' || (m.roundId || 0) !== roundId) return;
     if (!(await claim(`enact-${roundId}`))) return;
     done = true;
     if (typeof unsub === 'function') unsub();
+    // Resolve the index against the hand the board dealt — the Chancellor's
+    // client never writes tiles directly, so a forged enactment is impossible.
+    const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
+    const hand = asTiles(handSnap.val());
+    if (!Number.isInteger(idx) || idx < 0 || idx >= hand.length || !hand.every(isTile)) {
+      console.warn(`[board] round ${roundId}: chancellorEnactIdx ${idx} invalid for hand of ${hand.length}, ignoring`);
+      return;
+    }
+    const tile = hand[idx];
+    await appendToDiscard(hand.filter((_, i) => i !== idx));
+    playSound(tile === 'liberal' ? 'enact-liberal' : 'enact-fascist');
+    await update(ref(db, `games/${room}`), {
+      [`secret/legislative/${roundId}/enactedTile`]: tile,
+    });
     const field = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
-    const newVal = (currentMeta[field] || 0) + 1;
+    const newVal = (m[field] || 0) + 1;
     // Veto unlocks permanently once the 5th fascist policy is enacted.
     const unlock = field === 'fascistTrack' && vetoUnlocked(newVal);
     await update(metaRef, { [field]: newVal, ...(unlock ? { vetoUnlocked: true } : {}) });
+    // End-of-session reshuffle so the deck stays >= 3 (keeps Policy Peek honest).
+    await reshuffleIfShort().catch(e => console.warn('[board] reshuffle failed:', e && e.message));
 
     const win = checkWin({
-      liberalTrack: field === 'liberalTrack' ? newVal : currentMeta.liberalTrack,
-      fascistTrack: field === 'fascistTrack' ? newVal : currentMeta.fascistTrack,
+      liberalTrack: field === 'liberalTrack' ? newVal : m.liberalTrack,
+      fascistTrack: field === 'fascistTrack' ? newVal : m.fascistTrack,
     });
     if (win) return endGame(win);
 
     if (field === 'fascistTrack') {
-      const power = executivePowerFor((currentMeta.playerOrder || []).length, newVal);
+      const power = executivePowerFor((m.playerOrder || []).length, newVal);
       if (power) {
         await update(metaRef, { phase: 'executive_action', pendingPower: power });
         return;
@@ -425,27 +585,42 @@ function watchForVeto() {
     if (!decision) return;
     const m = await freshMeta();
     if (m.phase !== 'legislative_chancellor' || (m.roundId || 0) !== roundId) return;
-    done = true;
-    if (typeof unsub === 'function') unsub();
     if (decision === 'refused') {
+      // Refused: stay subscribed (a second request must still be answered),
+      // but record vetoUsed so the Chancellor's button never comes back —
+      // per the rules, a refused veto forces a normal enactment.
+      // No claim taken here, so a replayed 'refused' is idempotent.
+      playSound('vote-cast');
       await update(ref(db, `games/${room}`), {
         [`secret/legislative/${roundId}/vetoRequested`]: null,
         [`secret/legislative/${roundId}/vetoDecision`]: null,
+        [`secret/legislative/${roundId}/vetoUsed`]: true,
       });
       return;
     }
     if (decision !== 'agreed') return;
     if (!(await claim(`veto-${roundId}`))) return;
+    // Backstop: a veto answered after a refusal (forged re-request — the
+    // rules already block the write, but never trust the client alone).
+    const usedSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/vetoUsed`));
+    if (usedSnap.val() === true) {
+      console.warn(`[board] round ${roundId}: ignoring veto decision after refusal`);
+      return;
+    }
+    done = true;
+    if (typeof unsub === 'function') unsub();
+    playSound('election-fail'); // agreed veto: both tiles dead, tracker advances
     const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
     const hand = handSnap.val();
     const tiles = Array.isArray(hand) ? hand : Object.values(hand || {});
     const discSnap = await get(ref(db, `games/${room}/secret/discard`));
     const discVal = discSnap.val();
     const discard = (Array.isArray(discVal) ? discVal : Object.values(discVal || {})).concat(tiles);
-    const tracker = (currentMeta.electionTracker || 0) + 1;
+    const tracker = (m.electionTracker || 0) + 1;
     await update(ref(db, `games/${room}`), { 'secret/discard': discard });
+    await reshuffleIfShort().catch(e => console.warn('[board] reshuffle failed:', e && e.message));
     if (tracker >= 3) {
-      const win = await runChaos();
+      const win = await runChaos(m);
       if (win) return;
       advancePresidency(false).catch(e => console.warn('[board] advance failed:', e && e.message));
       return;
@@ -473,6 +648,7 @@ async function watchForExecutiveAction() {
       if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
       const roles = rolesSnap.val() || {};
+      playSound('execution');
       await update(ref(db, `games/${room}`), {
         [`players/${target}/alive`]: false,
         'meta/executionTarget': null,
@@ -498,6 +674,7 @@ async function watchForExecutiveAction() {
       const roles = rolesSnap.val() || {};
       // Hitler counts as fascist for this power.
       const result = roles[target] === 'liberal' ? 'liberal' : 'fascist';
+      playSound('reveal');
       await update(ref(db, `games/${room}`), {
         [`secret/executive/${currentMeta.roundId}/investigateResult`]: result,
         [`meta/investigatedUids/${target}`]: true,
@@ -519,9 +696,14 @@ async function watchForExecutiveAction() {
       done = true;
       if (typeof unsub === 'function') unsub();
       const enacting = currentMeta.presidentUid;
+      playSound('reveal'); // special election called
       const updates = {
         'meta/presidentUid': target,
         'meta/presidentUidLast': enacting,
+        // The outgoing Chancellor is term-limited during the special round,
+        // and clearing chancellorUid revokes their legislative read access.
+        'meta/chancellorUidLast': currentMeta.chancellorUid || null,
+        'meta/chancellorUid': null,
         'meta/chancellorCandidateUid': null,
         'meta/specialElectionTarget': null,
         'meta/pendingPower': null,
@@ -536,16 +718,13 @@ async function watchForExecutiveAction() {
     });
   } else if (power === 'policy_peek') {
     // Copy top 3 tiles for the President's eyes only, then wait for their
-    // Done tap (policyPeekSeen) before advancing. Read-only view: if the
-    // deck is short, show deck+discard merged without consuming anything.
+    // Done tap (policyPeekSeen) before advancing. The deck always holds >= 3
+    // tiles here (reshuffleIfShort runs after every session), so the peek is
+    // exactly what the next draw will deal — no merge, no lie.
     let deck = (await get(ref(db, `games/${room}/secret/deck`))).val() || [];
     if (!Array.isArray(deck)) deck = Object.values(deck);
-    let peek = deck.slice(0, 3);
-    if (peek.length < 3) {
-      let discard = (await get(ref(db, `games/${room}/secret/discard`))).val() || [];
-      if (!Array.isArray(discard)) discard = Object.values(discard);
-      peek = deck.concat(discard).slice(0, 3);
-    }
+    const peek = deck.slice(0, 3);
+    playSound('tile-draw');
     await set(ref(db, `games/${room}/secret/executive/${currentMeta.roundId}/policyPeek`), peek);
     let peekDone = false;
     let unsub = null;
@@ -564,6 +743,7 @@ async function watchForExecutiveAction() {
 }
 
 async function endGame(win) {
+  playSound(win.winner === 'liberal' ? 'win-liberal' : 'win-fascist');
   await update(metaRef, { winner: win.winner, winReason: win.reason, phase: 'gameover' });
 }
 
@@ -611,6 +791,12 @@ function render() {
     if (p.alive === false) classes.push('dead');
     return `<div class="${classes.join(' ')}">${escapeHtml(p.name || '?')}</div>`;
   }).join('');
+
+  // Host-only escape hatch, visible only while a vote is open.
+  const hostTools = el('hostTools');
+  if (hostTools) {
+    hostTools.style.display = (phase === 'election' && currentMeta.hostUid === myUid) ? 'block' : 'none';
+  }
 
   if (phase === 'gameover') {
     el('gameOverBanner').style.display = 'block';

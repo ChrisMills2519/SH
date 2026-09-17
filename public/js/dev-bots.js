@@ -88,18 +88,13 @@ export function initDevBots({ room }) {
       const key = `presdisc-${roundId}`;
       if (!acted.has(key)) {
         const drawSnap = await get(at(`secret/legislative/${roundId}/presidentDraw`));
-        const handSnap = await get(at(`secret/legislative/${roundId}/chancellorHand`));
+        const choiceSnap = await get(at(`secret/legislative/${roundId}/presidentDiscardIdx`));
         const tiles = asArray(drawSnap.val());
-        if (tiles.length && !handSnap.val()) {
+        if (tiles.length && (choiceSnap.val() === null || choiceSnap.val() === undefined)) {
           await sleep(800);
-          const idx = Math.floor(Math.random() * tiles.length);
-          const remaining = tiles.filter((_, i) => i !== idx);
-          const discSnap = await get(at('secret/discard'));
-          const discard = asArray(discSnap.val()).concat([tiles[idx]]);
-          await update(ref(db, `games/${room}`), {
-            [`secret/legislative/${roundId}/chancellorHand`]: remaining,
-            'secret/discard': discard,
-          });
+          // Index only, like a real phone: the board resolves and discards.
+          const idx = tiles.length <= 1 ? -1 : Math.floor(Math.random() * tiles.length);
+          await set(at(`secret/legislative/${roundId}/presidentDiscardIdx`), idx);
           acted.add(key);
         }
       }
@@ -110,13 +105,16 @@ export function initDevBots({ room }) {
       const key = `chanenact-${roundId}`;
       if (!acted.has(key)) {
         const handSnap = await get(at(`secret/legislative/${roundId}/chancellorHand`));
-        const enactedSnap = await get(at(`secret/legislative/${roundId}/enactedTile`));
+        const choiceSnap = await get(at(`secret/legislative/${roundId}/chancellorEnactIdx`));
         const tiles = asArray(handSnap.val());
-        if (tiles.length && !enactedSnap.val()) {
+        if (tiles.length && (choiceSnap.val() === null || choiceSnap.val() === undefined)) {
           const reqSnap = await get(at(`secret/legislative/${roundId}/vetoRequested`));
           const requested = reqSnap.val() === true;
+          const usedSnap = await get(at(`secret/legislative/${roundId}/vetoUsed`));
+          const vetoUsed = usedSnap.val() === true;
           // DEV fast-forward: bot chancellors veto 25% of the time once unlocked.
-          if (meta.vetoUnlocked === true && !requested && Math.random() < 0.25) {
+          // One shot per round: after a refusal the rules (and the board) force enact.
+          if (meta.vetoUnlocked === true && !requested && !vetoUsed && Math.random() < 0.25) {
             await sleep(800);
             await set(at(`secret/legislative/${roundId}/vetoRequested`), true);
             return;
@@ -131,12 +129,8 @@ export function initDevBots({ room }) {
           }
           await sleep(800);
           const idx = Math.floor(Math.random() * tiles.length);
-          const discSnap = await get(at('secret/discard'));
-          const discard = asArray(discSnap.val()).concat(tiles.filter((_, i) => i !== idx));
-          await update(ref(db, `games/${room}`), {
-            [`secret/legislative/${roundId}/enactedTile`]: tiles[idx],
-            'secret/discard': discard,
-          });
+          // Index only, like a real phone: the board resolves and discards.
+          await set(at(`secret/legislative/${roundId}/chancellorEnactIdx`), idx);
           acted.add(key);
         }
       }

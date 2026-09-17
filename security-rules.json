@@ -92,6 +92,7 @@
         },
 
         "votes": {
+          ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
           "$roundId": {
             ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
             "$uid": {
@@ -101,6 +102,7 @@
           }
         },
         "votesCast": {
+          ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
           "$roundId": {
             ".read": "auth != null",
             "$uid": {
@@ -109,6 +111,7 @@
           }
         },
         "votesRevealed": {
+          ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
           "$roundId": {
             ".read": "auth != null",
             ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
@@ -118,12 +121,14 @@
         "secret": {
           "roles": {
             ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
             "$uid": {
               ".read": "auth != null && auth.uid === $uid",
               ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && !data.exists()"
             }
           },
           "knownTeammates": {
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
             "$uid": {
               ".read": "auth != null && auth.uid === $uid",
               ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && !data.exists()"
@@ -135,31 +140,45 @@
           },
           "claims": {
             ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
             "$key": {
               ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
             }
           },
           "discard": {
-            ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val())",
-            ".write": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val())"
+            ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
           },
           "legislative": {
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
             "$roundId": {
               "presidentDraw": {
                 ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
                 ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
               },
+              "presidentDiscardIdx": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                ".write": "auth != null && ((auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() && !data.exists() && newData.isNumber() && newData.val() >= -1 && newData.val() <= 2) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
+              },
               "chancellorHand": {
                 ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
-                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val()"
+                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+              },
+              "chancellorEnactIdx": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                ".write": "auth != null && ((auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() && !data.exists() && newData.isNumber() && newData.val() >= 0 && newData.val() <= 1) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
               },
               "enactedTile": {
                 ".read": "auth != null",
-                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() && (newData.val() === 'liberal' || newData.val() === 'fascist')"
+                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && (newData.val() === 'liberal' || newData.val() === 'fascist')"
+              },
+              "vetoUsed": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
               },
               "vetoRequested": {
                 ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
-                ".write": "auth != null && ((auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() && !data.exists() && newData.val() === true) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
+                ".write": "auth != null && ((auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() && !data.exists() && newData.val() === true && root.child('games').child($roomId).child('secret').child('legislative').child($roundId).child('vetoUsed').val() !== true) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
               },
               "vetoDecision": {
                 ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
@@ -168,6 +187,7 @@
             }
           },
           "executive": {
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
             "$roundId": {
               "investigateResult": {
                 ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val()",

@@ -65,10 +65,31 @@ export function freshDeck() {
 export function shuffle(array) {
   const arr = array.slice();
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randInt(i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+// Uniform int in [0, n): crypto randomness with rejection sampling, falling
+// back to Math.random where WebCrypto is unavailable. Shared by the initial
+// shuffle here and the board's mid-game reshuffle.
+export function randInt(n) {
+  try {
+    const cryptoObj = globalThis.crypto;
+    if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+      const range = 0x100000000;
+      const limit = range - (range % n);
+      const buf = new Uint32Array(1);
+      let x;
+      do {
+        cryptoObj.getRandomValues(buf);
+        x = buf[0];
+      } while (x >= limit);
+      return x % n;
+    }
+  } catch (_) { /* fall through */ }
+  return Math.floor(Math.random() * n);
 }
 
 // --- Role assignment --------------------------------------------------------

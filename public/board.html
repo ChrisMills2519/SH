@@ -9,7 +9,7 @@
 </head>
 <body>
   <div class="board-wrap">
-    <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room <span id="roomCode"></span></span></h1>
+    <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room <span id="roomCode"></span></span> <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button></h1>
     <p class="muted">Phase: <span id="phaseLabel"></span></p>
 
     <div id="gameOverBanner" class="role-banner" style="display:none"></div>
@@ -50,6 +50,12 @@
 
       <h3>Players</h3>
       <div class="player-list" id="playerChips"></div>
+
+      <div id="hostTools" style="display:none">
+        <h3>Host tools</h3>
+        <button id="forceResolveBtn">Force-resolve election (missing votes count as Nein)</button>
+        <p class="muted">Only for a stuck vote — resolves immediately with the ballots cast so far.</p>
+      </div>
     </section>
 
     <!-- DEV-ONLY START: solo-testing shortcuts. Delete this block before game night. -->

@@ -3,6 +3,7 @@ import {
   ref, get, set, update, onValue,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 import { ineligibleChancellorCandidates } from './game-logic.js';
+import { playSound, initSoundToggle } from './sound.js';
 
 const params = new URLSearchParams(location.search);
 const room = params.get('room');
@@ -17,12 +18,19 @@ let myTeammates = [];
 let renderedForRound = {}; // avoid re-rendering the same one-shot UI repeatedly
 let roleRevealed = false; // tap-to-reveal: role starts facedown each session
 let revealedCards = {}; // "roundId:idx" / "peek:roundId:idx" -> true once flipped face-up
+let presidentDrawDoneFor = null; // roundId fully painted with tiles (one-shot get, not live)
+let presidentDrawInflightFor = null; // roundId currently fetching (prevents overlapping paints)
+let investigatePaintedFor = null; // roundId options painted (result box owned by live listener)
+let peekPaintedFor = null; // roundId peek tiles painted (live listener owns repaints)
+let lastPingKey = null; // your-turn ping fires once per action (render() re-runs on every update)
+let winPlayedFor = null; // gameover stinger fires once per result
 const REDUCED_MOTION = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const FLIP_MS = REDUCED_MOTION ? 0 : 550;
 
 async function main() {
   const user = await ensureSignedIn();
   myUid = user.uid;
+  initSoundToggle();
 
   const name = nameFromUrl || prompt('Your name:');
 
@@ -74,17 +82,29 @@ function render() {
   el('status').textContent = phase ? `Phase: ${phase}` : 'Waiting for host to start...';
 
   if (phase === 'gameover') {
+    dropLiveSubs();
+    const winKey = `${currentMeta.winner}:${currentMeta.winReason}`;
+    if (winPlayedFor !== winKey) {
+      winPlayedFor = winKey;
+      playSound(currentMeta.winner === 'liberal' ? 'win-liberal' : 'win-fascist');
+    }
+    // New game restarts at round 0 — clear per-round paint guards so the
+    // next game repaints instead of trusting the previous game's flags.
+    presidentDrawDoneFor = presidentDrawInflightFor = investigatePaintedFor = peekPaintedFor = null;
+    renderedForRound = {};
     el('main').innerHTML = `<div class="role-banner ${currentMeta.winner}">
       ${currentMeta.winner === 'liberal' ? 'Liberals' : 'Fascists'} win!</div>`;
     return;
   }
 
   if (!myRole) {
+    dropLiveSubs();
     el('main').innerHTML = `<p class="muted">Waiting for the host to start the game...</p>`;
     return;
   }
 
   if (currentPlayers[myUid] && currentPlayers[myUid].alive === false) {
+    dropLiveSubs();
     el('main').innerHTML = `
       <div class="role-banner dead">You have been executed.</div>
       <p class="muted">You are out of the game — sit back and watch. ${escapeHtml(describeWhosTurn())}</p>
@@ -141,6 +161,7 @@ function render() {
 }
 
 function renderIdle() {
+  dropLiveSubs();
   const roleLabel = myRole === 'hitler' ? 'Hitler' : myRole[0].toUpperCase() + myRole.slice(1);
   const whosTurn = describeWhosTurn();
   const roleImg = myRole === 'hitler' ? 'role-hitler' : `role-${myRole}`;
@@ -157,6 +178,7 @@ function renderIdle() {
       <p>${whosTurn}</p>
     `;
     el('roleScene').addEventListener('click', () => {
+      playSound('flip');
       el('roleFlip').classList.remove('flipped');
       setTimeout(() => { roleRevealed = true; render(); }, FLIP_MS);
     });
@@ -189,7 +211,17 @@ function nameOf(uid) {
   return (currentPlayers[uid] && currentPlayers[uid].name) || '?';
 }
 
+// Your-turn ping: render() re-runs on every players/meta update, so only
+// chime on the first paint of each distinct action (phase+round).
+function pingOnce(key) {
+  if (lastPingKey === key) return;
+  lastPingKey = key;
+  playSound('your-turn');
+}
+
 function renderNomination() {
+  dropLiveSubs();
+  pingOnce(`nom-${currentMeta.roundId}`);
   const order = currentMeta.playerOrder || [];
   const ineligible = ineligibleChancellorCandidates({
     lastPresidentUid: currentMeta.presidentUidLast,
@@ -207,18 +239,21 @@ function renderNomination() {
   `;
   document.querySelectorAll('.nominateBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
+      playSound('vote-cast');
       await update(ref(db, `games/${room}/meta`), { chancellorCandidateUid: btn.dataset.uid });
     });
   });
 }
 
 function renderVoting() {
+  dropLiveSubs();
   const roundId = currentMeta.roundId;
   const key = `vote-${roundId}`;
   if (renderedForRound[key]) {
     el('main').innerHTML = `<p class="muted">Vote cast. Waiting for everyone else...</p>`;
     return;
   }
+  pingOnce(`vote-${roundId}`);
   el('main').innerHTML = `
     <h2>${nameOf(currentMeta.presidentUid)} nominates ${nameOf(currentMeta.chancellorCandidateUid)}</h2>
     <div class="vote-buttons">
@@ -242,6 +277,7 @@ function renderVoting() {
   };
   // Play the card facedown with a flip, then record the vote when it lands.
   const playBallot = (choice, flipId, otherBtnId) => {
+    playSound('vote-cast');
     const other = el(otherBtnId);
     if (other) other.setAttribute('disabled', '');
     el(flipId).classList.add('flipped');
@@ -255,11 +291,51 @@ function tileArray(v) {
   return Array.isArray(v) ? v : Object.values(v || {});
 }
 
+// Live-subscription registry. render() runs on every players/meta/roles
+// update, so branches needing live data must hold at most ONE listener each:
+// ensureLiveSub(key, subscribe) attaches once per key and drops any live
+// subscription for a different key (phase/round change). Without this, every
+// render stacked another onValue on the same path — dozens of live listeners
+// per phone, each re-rendering and re-attaching handlers over stale closures.
+// Branches with no live data call dropLiveSubs().
+const liveSubs = {};
+function dropLiveSubs(except = null) {
+  for (const k of Object.keys(liveSubs)) {
+    if (k === except) continue;
+    try { liveSubs[k](); } catch (_) { /* already gone */ }
+    delete liveSubs[k];
+  }
+}
+function ensureLiveSub(key, subscribe) {
+  dropLiveSubs(key);
+  if (liveSubs[key]) return;
+  liveSubs[key] = subscribe() || (() => {});
+}
+
+// Guard for in-flight live callbacks: don't paint over a newer phase/round.
+function isStaleView(roundId, phase, power) {
+  if ((currentMeta.roundId ?? null) !== roundId) return true;
+  if ((currentMeta.phase ?? null) !== phase) return true;
+  if (power !== undefined && (currentMeta.pendingPower ?? null) !== power) return true;
+  return false;
+}
+
 async function renderPresidentDraw() {
   const roundId = currentMeta.roundId;
+  dropLiveSubs();
+  pingOnce(`pres-${roundId}`);
+  // One-shot data: paint once per round. The inflight flag is set
+  // synchronously so overlapping renders can't double-paint/double-attach.
+  if (presidentDrawDoneFor === roundId || presidentDrawInflightFor === roundId) return;
+  presidentDrawInflightFor = roundId;
   const snap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDraw`));
+  presidentDrawInflightFor = null;
+  // Don't paint (or repaint) over a newer phase/round, or a paint that landed first.
+  if (isStaleView(roundId, 'legislative_president') || presidentDrawDoneFor === roundId) return;
+  if (currentMeta.presidentUid !== myUid) return;
   const tiles = tileArray(snap.val());
   if (!tiles.length) { el('main').innerHTML = `<p class="muted">Loading policies...</p>`; return; }
+  presidentDrawDoneFor = roundId;
   if (tiles.length <= 1) {
     // Short-draw guard: nothing to choose — pass everything through.
     el('main').innerHTML = `
@@ -271,9 +347,9 @@ async function renderPresidentDraw() {
       <button id="passBtn">Pass to Chancellor</button>
     `;
     document.getElementById('passBtn').addEventListener('click', async () => {
-      await update(ref(db, `games/${room}`), {
-        [`secret/legislative/${roundId}/chancellorHand`]: tiles,
-      });
+      // Pass-through: the board forwards the single tile (idx -1 = no choice).
+      playSound('tile-draw');
+      await set(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDiscardIdx`), -1);
       el('main').innerHTML = `<p class="muted">Sent to the Chancellor. Waiting...</p>`;
     });
     return;
@@ -288,15 +364,11 @@ async function renderPresidentDraw() {
   document.querySelectorAll('.policy-tile').forEach(elm => {
     elm.addEventListener('click', async () => {
       if (!revealPolicyTile(elm, roundId)) return; // first tap just reveals
+      // Index only: the board resolves it against the draw it dealt and
+      // performs the discard itself, so a forged hand can't survive.
       const idx = Number(elm.dataset.idx);
-      const discarded = tiles[idx];
-      const remaining = tiles.filter((_, i) => i !== idx);
-      const discardSnap = await get(ref(db, `games/${room}/secret/discard`));
-      const discard = (discardSnap.val() || []).concat([discarded]);
-      await update(ref(db, `games/${room}`), {
-        [`secret/legislative/${roundId}/chancellorHand`]: remaining,
-        'secret/discard': discard,
-      });
+      playSound('tile-draw');
+      await set(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDiscardIdx`), idx);
       el('main').innerHTML = `<p class="muted">Sent to the Chancellor. Waiting...</p>`;
     });
   });
@@ -324,6 +396,7 @@ function revealPolicyTile(elm, revealKey) {
   const key = `${revealKey}:${elm.dataset.idx}`;
   if (revealedCards[key]) return true; // already face-up: caller should act
   revealedCards[key] = true;
+  playSound('flip');
   const inner = elm.querySelector('.flip-inner');
   if (inner) inner.classList.remove('flipped');
   return false;
@@ -332,11 +405,16 @@ function revealPolicyTile(elm, revealKey) {
 function renderChancellorHand() {
   const roundId = currentMeta.roundId;
   const base = `games/${room}/secret/legislative/${roundId}`;
-  // Re-render on veto state changes (request → waiting; refused → enact again).
-  onValue(ref(db, `${base}/vetoRequested`), async reqSnap => {
+  // Single live subscription per round (see registry above). Re-render on
+  // veto state changes (request → waiting; refused → enact again).
+  ensureLiveSub(`chan-${roundId}`, () => onValue(ref(db, `${base}/vetoRequested`), async reqSnap => {
+    if (isStaleView(roundId, 'legislative_chancellor')) return;
     const requested = reqSnap.val() === true;
+    const usedSnap = await get(ref(db, `${base}/vetoUsed`));
+    const vetoUsed = usedSnap.val() === true;
     const handSnap = await get(ref(db, `${base}/chancellorHand`));
     const tiles = tileArray(handSnap.val());
+    if (isStaleView(roundId, 'legislative_chancellor')) return;
     if (!tiles.length) { el('main').innerHTML = `<p class="muted">Loading policies...</p>`; return; }
     if (requested) {
       const decSnap = await get(ref(db, `${base}/vetoDecision`));
@@ -351,7 +429,8 @@ function renderChancellorHand() {
       }
       // Refused: fall through to the enact UI below.
     }
-    const canVeto = currentMeta.vetoUnlocked === true && !requested;
+    const canVeto = currentMeta.vetoUnlocked === true && !requested && !vetoUsed;
+    pingOnce(`chan-${roundId}`);
     el('main').innerHTML = `
       <h2>${tiles.length > 1 ? 'Enact one policy' : 'Enact the policy'}</h2>
       <p class="muted">${tiles.length > 1 ? 'Tap a card to peek, tap again to enact it. The other is discarded, unseen.' : 'Only one tile remained in the supply.'}</p>
@@ -363,43 +442,43 @@ function renderChancellorHand() {
     document.querySelectorAll('.policy-tile').forEach(elm => {
       elm.addEventListener('click', async () => {
         if (!revealPolicyTile(elm, roundId)) return; // first tap just reveals
+        // Index only: the board resolves it against the hand it dealt and
+        // performs the discard itself, so a forged enactment is impossible.
         const idx = Number(elm.dataset.idx);
-        const enacted = tiles[idx];
-        const rest = tiles.filter((_, i) => i !== idx);
-        const discardSnap = await get(ref(db, `games/${room}/secret/discard`));
-        const discard = (discardSnap.val() || []).concat(rest);
-        await update(ref(db, `games/${room}`), {
-          [`secret/legislative/${roundId}/enactedTile`]: enacted,
-          'secret/discard': discard,
-        });
+        playSound('tile-draw');
+        await set(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorEnactIdx`), idx);
         el('main').innerHTML = `<p class="muted">Policy enacted. Waiting...</p>`;
       });
     });
     const vetoBtn = document.getElementById('vetoBtn');
     if (vetoBtn) {
       vetoBtn.addEventListener('click', async () => {
+        playSound('vote-cast');
         await set(ref(db, `${base}/vetoRequested`), true);
         el('main').innerHTML = `<p class="muted">Veto requested. Waiting for the President...</p>`;
       });
     }
-  });
+  }));
 }
 
 function renderVetoConsent() {
   const roundId = currentMeta.roundId;
   const base = `games/${room}/secret/legislative/${roundId}`;
-  onValue(ref(db, `${base}/vetoRequested`), async reqSnap => {
+  ensureLiveSub(`veto-${roundId}`, () => onValue(ref(db, `${base}/vetoRequested`), async reqSnap => {
+    if (isStaleView(roundId, 'legislative_chancellor')) return;
     if (reqSnap.val() !== true) {
       el('main').innerHTML = `<p>${escapeHtml(nameOf(currentMeta.chancellorUid))} is choosing a policy.</p>`;
       return;
     }
     const decSnap = await get(ref(db, `${base}/vetoDecision`));
+    if (isStaleView(roundId, 'legislative_chancellor')) return;
     if (decSnap.val()) {
       el('main').innerHTML = `<p class="muted">Decision recorded. Resuming...</p>`;
       return;
     }
     const handSnap = await get(ref(db, `${base}/chancellorHand`));
     const tiles = tileArray(handSnap.val());
+    pingOnce(`veto-${roundId}`);
     el('main').innerHTML = `
       <h2>Chancellor wishes to veto</h2>
       <p class="muted">Agree to discard both policies (tracker +1), or refuse and they must enact one.</p>
@@ -410,17 +489,21 @@ function renderVetoConsent() {
       </div>
     `;
     document.getElementById('vetoAgreeBtn').addEventListener('click', async () => {
+      playSound('vote-cast');
       await set(ref(db, `${base}/vetoDecision`), 'agreed');
       el('main').innerHTML = `<p class="muted">Veto agreed. Resuming...</p>`;
     });
     document.getElementById('vetoRefuseBtn').addEventListener('click', async () => {
+      playSound('vote-cast');
       await set(ref(db, `${base}/vetoDecision`), 'refused');
       el('main').innerHTML = `<p class="muted">Veto refused. Chancellor must enact.</p>`;
     });
-  });
+  }));
 }
 
 function renderExecution() {
+  dropLiveSubs();
+  pingOnce(`pow-${currentMeta.roundId}`);
   const order = currentMeta.playerOrder || [];
   const options = order.filter(uid => uid !== myUid && currentPlayers[uid] && currentPlayers[uid].alive !== false);
   el('main').innerHTML = `
@@ -429,6 +512,7 @@ function renderExecution() {
   `;
   document.querySelectorAll('.executeBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
+      playSound('execution');
       await update(ref(db, `games/${room}/meta`), { executionTarget: btn.dataset.uid });
       el('main').innerHTML = `<p class="muted">Execution ordered.</p>`;
     });
@@ -437,6 +521,30 @@ function renderExecution() {
 
 function renderInvestigate() {
   const roundId = currentMeta.roundId;
+  // Live result (president-only read; rule already exists). Attached before
+  // the options paint so an already-arrived result lands in the fresh box.
+  ensureLiveSub(`invest-${roundId}`, () => onValue(ref(db, `games/${room}/secret/executive/${roundId}/investigateResult`), snap => {
+    if (isStaleView(roundId, 'executive_action', 'investigate_loyalty')) return;
+    const result = snap.val();
+    if (!result) return;
+    const box = document.getElementById('investigateResult');
+    if (box) {
+      playSound('reveal');
+      // Auto-flip the loyalty card as it arrives.
+      box.innerHTML = `<div class="flip-scene center"><div class="flip-inner flipped" id="investigateFlip">
+        <img class="role-img flip-face" src="img/role-${escapeHtml(String(result))}.png" alt="${escapeHtml(String(result))}" />
+        <img class="role-img flip-face flip-back" src="img/back-role.png" alt="" />
+      </div></div>`;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const flip = document.getElementById('investigateFlip');
+        if (flip) flip.classList.remove('flipped');
+      }));
+    }
+  }));
+  // Static options: paint once per round — repaints would wipe the live result box.
+  if (investigatePaintedFor === roundId) return;
+  investigatePaintedFor = roundId;
+  pingOnce(`pow-${roundId}`);
   const order = currentMeta.playerOrder || [];
   // Official rule: no player may be investigated twice in one game.
   const investigated = currentMeta.investigatedUids || {};
@@ -449,31 +557,17 @@ function renderInvestigate() {
   `;
   document.querySelectorAll('.investigateBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
+      playSound('vote-cast');
       await update(ref(db, `games/${room}/meta`), { investigateTarget: btn.dataset.uid });
       const opts = document.getElementById('investigateOptions');
       if (opts) opts.innerHTML = `<p class="muted">Investigating ${escapeHtml(nameOf(btn.dataset.uid))}...</p>`;
     });
   });
-  // Live result (president-only read; rule already exists).
-  onValue(ref(db, `games/${room}/secret/executive/${roundId}/investigateResult`), snap => {
-    const result = snap.val();
-    if (!result) return;
-    const box = document.getElementById('investigateResult');
-    if (box) {
-      // Auto-flip the loyalty card as it arrives.
-      box.innerHTML = `<div class="flip-scene center"><div class="flip-inner flipped" id="investigateFlip">
-        <img class="role-img flip-face" src="img/role-${escapeHtml(String(result))}.png" alt="${escapeHtml(String(result))}" />
-        <img class="role-img flip-face flip-back" src="img/back-role.png" alt="" />
-      </div></div>`;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        const flip = document.getElementById('investigateFlip');
-        if (flip) flip.classList.remove('flipped');
-      }));
-    }
-  });
 }
 
 function renderSpecialElection() {
+  dropLiveSubs();
+  pingOnce(`pow-${currentMeta.roundId}`);
   // No eligibility restriction: any other living player may be chosen.
   const order = currentMeta.playerOrder || [];
   const options = order.filter(uid => uid !== myUid && currentPlayers[uid] && currentPlayers[uid].alive !== false);
@@ -484,6 +578,7 @@ function renderSpecialElection() {
   `;
   document.querySelectorAll('.specialBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
+      playSound('vote-cast');
       await update(ref(db, `games/${room}/meta`), { specialElectionTarget: btn.dataset.uid });
       el('main').innerHTML = `<p class="muted">Special election called for ${escapeHtml(nameOf(btn.dataset.uid))}.</p>`;
     });
@@ -492,11 +587,18 @@ function renderSpecialElection() {
 
 function renderPolicyPeek() {
   const roundId = currentMeta.roundId;
+  // Tiles arrive once via the live listener, which owns all repaints — a
+  // second render() must not rewind to "Loading..." after tiles are shown.
+  if (peekPaintedFor === roundId) return;
+  pingOnce(`pow-${roundId}`);
   el('main').innerHTML = `<h2 class="power-title"><img class="power-icon" src="img/icon-peek.png" alt="" />Policy Peek</h2><p class="muted">Loading top 3 policies...</p>`;
   // Board writes the peek after entering executive_action, so listen live.
-  onValue(ref(db, `games/${room}/secret/executive/${roundId}/policyPeek`), async snap => {
+  ensureLiveSub(`peek-${roundId}`, () => onValue(ref(db, `games/${room}/secret/executive/${roundId}/policyPeek`), async snap => {
+    if (isStaleView(roundId, 'executive_action', 'policy_peek')) return;
     const tiles = snap.val();
     if (!tiles) return;
+    peekPaintedFor = roundId;
+    playSound('tile-draw');
     el('main').innerHTML = `
       <h2 class="power-title"><img class="power-icon" src="img/icon-peek.png" alt="" />Policy Peek</h2>
       <p class="muted">Top 3 deck tiles (only you see this). Tap each card to peek, then Done.</p>
@@ -509,10 +611,11 @@ function renderPolicyPeek() {
       elm.addEventListener('click', () => revealPolicyTile(elm, `peek:${roundId}`));
     });
     document.getElementById('peekDoneBtn').addEventListener('click', async () => {
+      playSound('vote-cast');
       await set(ref(db, `games/${room}/secret/executive/${roundId}/policyPeekSeen`), true);
       el('main').innerHTML = `<p class="muted">Resuming game...</p>`;
     });
-  });
+  }));
 }
 
 function escapeHtml(str) {

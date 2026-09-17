@@ -38,3 +38,48 @@ Abstract symbols only; no historical insignia.
   `img/original-2026-09-17/` along with the pre-replacement PNGs.
   Phones start roles/policies facedown and flip to reveal; ballots flip
   facedown as the vote is played.
+
+## Sound effects (`snd/`)
+
+All MP3, mono 44.1kHz ~64kbps, loudness-normalized (~-16 LUFS) with leading
+silence trimmed. Total ~264KB for 14 files — fast on phones.
+Downloaded 2026-09-17 from Pixabay under the Pixabay Content License
+(free, no attribution required, game use allowed, no standalone
+redistribution). Long originals trimmed where noted (`flip` → 0.7s,
+`chaos` → 2.5s, `enact-fascist` → 3.5s). Raw originals kept untracked in
+`/tmp/opencode/audio/raw/` only, not vendored.
+
+- `flip.mp3` — Card Flick by freesound_community —
+  https://pixabay.com/sound-effects/film-special-effects-card-flick-78201/
+- `tile-draw.mp3` — pre-existing `taking-playing-card.mp3`, re-encoded to
+  house spec (replaces the old stereo 256k file of that name)
+- `vote-cast.mp3` — Clean Minimal Pop by DRAGON-STUDIO —
+  https://pixabay.com/sound-effects/clean-minimal-pop-467466/
+- `election-pass.mp3` — Game Bonus by Universfield —
+  https://pixabay.com/sound-effects/film-special-effects-game-bonus-144751/
+- `election-fail.mp3` — 8-bit Buzz by DRAGON-STUDIO —
+  https://pixabay.com/sound-effects/8-bit-buzz-463201/
+- `chaos.mp3` — Alarm by 8footdino_on_scratch (trimmed from 23s) —
+  https://pixabay.com/sound-effects/film-special-effects-alarm-301729/
+- `enact-liberal.mp3` — Brass Fanfare by Universfield —
+  https://pixabay.com/sound-effects/film-special-effects-brass-fanfare-144755/
+- `enact-fascist.mp3` — Cinematic Dark Hit Logo by Alex_Kizenkov
+  (trimmed from 12s) —
+  https://pixabay.com/sound-effects/film-special-effects-cinematic-dark-hit-logo-463005/
+- `execution.mp3` — Distant Bang by DRAGON-STUDIO (tasteful gavel substitute) —
+  https://pixabay.com/sound-effects/distant-bang-472364/
+- `reveal.mp3` — Appearance by Universfield (shared peek/investigate/special cue) —
+  https://pixabay.com/sound-effects/film-special-effects-appearance-143023/
+- `your-turn.mp3` — Message Ping by Universfield —
+  https://pixabay.com/sound-effects/film-special-effects-message-ping-351298/
+- `game-start.mp3` — Battle Start by freesound_gamestudio —
+  https://pixabay.com/sound-effects/film-special-effects-battle-start-408410/
+- `win-liberal.mp3` — Great Success by freesound_gamestudio —
+  https://pixabay.com/sound-effects/film-special-effects-great-success-384935/
+- `win-fascist.mp3` — Creepy Piano Stinger by Universfield —
+  https://pixabay.com/sound-effects/film-special-effects-creepy-piano-stinger-153296/
+
+Scrape method (per saturday/AGENTS.md precedent): `curl_cffi` chrome124
+impersonation for Pixabay search/detail pages (plain curl is Cloudflare-403),
+CDN `cdn.pixabay.com/download/audio/...` fetched with plain curl, script at
+`/tmp/opencode/audio/px_sfx.py`.

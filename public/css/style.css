@@ -253,6 +253,17 @@ img.policy-tile.policy-tile-img {
   filter: invert(90%);
 }
 
+/* Mute toggle (board + phones) */
+.sound-toggle {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 14px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #444;
+  vertical-align: middle;
+}
+
 /* Small displays: stack the board tracks instead of squeezing them. */
 @media (max-width: 700px) {
   .tracks { flex-direction: column; }
