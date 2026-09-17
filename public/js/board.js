@@ -132,10 +132,16 @@ function alivePlayers() {
 }
 
 function watchForNomination() {
-  const unsub = onValue(ref(db, `games/${room}/meta/chancellorCandidateUid`), async snap => {
+  // NB: onValue can invoke the callback synchronously with cached data,
+  // before `unsub` is assigned — hence the done-flag + guarded unsub.
+  let done = false;
+  let unsub = null;
+  unsub = onValue(ref(db, `games/${room}/meta/chancellorCandidateUid`), async snap => {
+    if (done) return;
     const candidate = snap.val();
     if (!candidate) return;
-    unsub();
+    done = true;
+    if (typeof unsub === 'function') unsub();
     const roundId = (currentMeta.roundId || 0) + 1;
     await update(metaRef, { roundId, phase: 'election' });
   });
@@ -145,10 +151,14 @@ function watchForVotes() {
   const roundId = currentMeta.roundId;
   const alive = alivePlayers();
   const castRef = ref(db, `games/${room}/votesCast/${roundId}`);
-  const unsub = onValue(castRef, async snap => {
+  let done = false;
+  let unsub = null;
+  unsub = onValue(castRef, async snap => {
+    if (done) return;
     const cast = snap.val() || {};
     if (Object.keys(cast).length < alive.length) return;
-    unsub();
+    done = true;
+    if (typeof unsub === 'function') unsub();
     await set(ref(db, `games/${room}/votesRevealed/${roundId}`), true);
     const votesSnap = await get(ref(db, `games/${room}/votes/${roundId}`));
     const votes = votesSnap.val() || {};
@@ -261,6 +271,8 @@ async function advancePresidency(snapshotLasts = true) {
     const updates = {
       presidentUid: next,
       specialElectionReturnUid: null,
+      chancellorCandidateUid: null,
+      chancellorUid: null,
       phase: 'nomination',
     };
     if (snapshotLasts) {
@@ -280,6 +292,8 @@ async function advancePresidency(snapshotLasts = true) {
   } while (currentPlayers[next] && currentPlayers[next].alive === false);
   const updates = {
     presidentUid: next,
+    chancellorCandidateUid: null,
+    chancellorUid: null,
     phase: 'nomination',
   };
   if (snapshotLasts) {
@@ -291,19 +305,27 @@ async function advancePresidency(snapshotLasts = true) {
 
 function watchForPresidentDiscard() {
   const roundId = currentMeta.roundId;
-  const unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`), snap => {
+  let done = false;
+  let unsub = null;
+  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`), snap => {
+    if (done) return;
     if (!snap.val()) return;
-    unsub();
+    done = true;
+    if (typeof unsub === 'function') unsub();
     update(metaRef, { phase: 'legislative_chancellor' });
   });
 }
 
 function watchForChancellorEnact() {
   const roundId = currentMeta.roundId;
-  const unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/enactedTile`), async snap => {
+  let done = false;
+  let unsub = null;
+  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/enactedTile`), async snap => {
+    if (done) return;
     const tile = snap.val();
     if (!tile) return;
-    unsub();
+    done = true;
+    if (typeof unsub === 'function') unsub();
     const field = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
     const newVal = (currentMeta[field] || 0) + 1;
     await update(metaRef, { [field]: newVal });
@@ -328,10 +350,14 @@ function watchForChancellorEnact() {
 async function watchForExecutiveAction() {
   const power = currentMeta.pendingPower;
   if (power === 'execution') {
-    const unsub = onValue(ref(db, `games/${room}/meta/executionTarget`), async snap => {
+    let done = false;
+    let unsub = null;
+    unsub = onValue(ref(db, `games/${room}/meta/executionTarget`), async snap => {
+      if (done) return;
       const target = snap.val();
       if (!target) return;
-      unsub();
+      done = true;
+      if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
       const roles = rolesSnap.val() || {};
       await update(ref(db, `games/${room}`), {
@@ -344,10 +370,14 @@ async function watchForExecutiveAction() {
       advancePresidency();
     });
   } else if (power === 'investigate_loyalty') {
-    const unsub = onValue(ref(db, `games/${room}/meta/investigateTarget`), async snap => {
+    let done = false;
+    let unsub = null;
+    unsub = onValue(ref(db, `games/${room}/meta/investigateTarget`), async snap => {
+      if (done) return;
       const target = snap.val();
       if (!target) return;
-      unsub();
+      done = true;
+      if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
       const roles = rolesSnap.val() || {};
       // Hitler counts as fascist for this power.
@@ -361,10 +391,14 @@ async function watchForExecutiveAction() {
       advancePresidency();
     });
   } else if (power === 'special_election') {
-    const unsub = onValue(ref(db, `games/${room}/meta/specialElectionTarget`), async snap => {
+    let done = false;
+    let unsub = null;
+    unsub = onValue(ref(db, `games/${room}/meta/specialElectionTarget`), async snap => {
+      if (done) return;
       const target = snap.val();
       if (!target) return;
-      unsub();
+      done = true;
+      if (typeof unsub === 'function') unsub();
       const enacting = currentMeta.presidentUid;
       const updates = {
         'meta/presidentUid': target,
@@ -394,9 +428,13 @@ async function watchForExecutiveAction() {
       peek = deck.concat(discard).slice(0, 3);
     }
     await set(ref(db, `games/${room}/secret/executive/${currentMeta.roundId}/policyPeek`), peek);
-    const unsub = onValue(ref(db, `games/${room}/secret/executive/${currentMeta.roundId}/policyPeekSeen`), async snap => {
+    let peekDone = false;
+    let unsub = null;
+    unsub = onValue(ref(db, `games/${room}/secret/executive/${currentMeta.roundId}/policyPeekSeen`), async snap => {
+      if (peekDone) return;
       if (snap.val() !== true) return;
-      unsub();
+      peekDone = true;
+      if (typeof unsub === 'function') unsub();
       await update(ref(db, `games/${room}`), { 'meta/pendingPower': null });
       advancePresidency();
     });
