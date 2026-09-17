@@ -162,11 +162,13 @@
           "executive": {
             "$roundId": {
               "investigateResult": {
-                ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val()",
+                // DEV ONLY: host may read for bot presidents (prod: president only).
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
                 ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && (newData.val() === 'liberal' || newData.val() === 'fascist')"
               },
               "policyPeek": {
-                ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val()",
+                // DEV ONLY: host may read for bot presidents (prod: president only).
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
                 ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
               },
               "policyPeekSeen": {
