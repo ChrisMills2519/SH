@@ -76,6 +76,10 @@ seat), and there's no spectator mode beyond the executed-player banner.
   **Fill bots to 5 / 7** tops up the lobby with bot seats, **Remove bots** deletes them.
 - Bots run in the board page: always vote Ja, random nominate/discard/enact/power picks,
   auto-ack Policy Peek. Drive 1–2 real seats (phone + incognito tab) and let bots do the rest.
+- **Rig next power** buttons (nomination phase only): set the fascist track and plant 3
+  fascist tiles so the next enact fires that power on demand — no need to play 4+ rounds to
+  reach execution. Bracket-aware: peek exists at 5–6 players, investigate/special need 7+
+  (Fill to 7), execution everywhere. Warns instead of breaking if the track already passed it.
 - Requires the dev database rules: `firebase deploy --only database --config firebase.dev.json
   --project secreth-10e81`. **Revert right after testing** with `firebase deploy --only
   database --project secreth-10e81` (prod `security-rules.json`).

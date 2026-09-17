@@ -6,6 +6,7 @@
 // flagged `isBot: true`. Fast-forward brains: always vote Ja, random
 // legal moves everywhere else. Only imported when `?dev=1` is present.
 import { db, ensureSignedIn } from './firebase-config.js';
+import { executivePowerFor } from './game-logic.js';
 import {
   ref, get, set, update, remove, onValue,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
@@ -227,6 +228,43 @@ export function initDevBots({ room }) {
     console.log('[devbots] bots removed');
   }
 
+  // DEV fast-travel: make the NEXT enacted policy trigger the chosen
+  // executive power. Sets fascistTrack to (position - 1) for this game's
+  // player-count bracket and plants 3 fascist tiles on top of the deck, so
+  // the next legislative session enacts fascist and the power fires.
+  // Only during nomination — rigging mid-session would corrupt the live hand.
+  async function rigPower(power) {
+    if (!myUid || !meta.hostUid || myUid !== meta.hostUid) {
+      alert('Rigging only works from the host board tab.');
+      return;
+    }
+    if ((meta.phase || 'lobby') !== 'nomination') {
+      alert(`Rig during nomination (now: ${meta.phase || 'lobby'}).`);
+      return;
+    }
+    const count = (meta.playerOrder || []).length || Object.keys(players).length;
+    let pos = -1;
+    for (let p = 1; p <= 5; p++) {
+      if (executivePowerFor(count, p) === power) { pos = p; break; }
+    }
+    if (pos === -1) {
+      alert(`${power} never triggers with ${count} players — use Fill/Remove bots to change brackets (5-6 / 7-8 / 9-10).`);
+      return;
+    }
+    const cur = meta.fascistTrack || 0;
+    if (cur >= pos) {
+      alert(`Fascist track already at ${cur} — ${power} (slot ${pos}) already passed. Start a new game to re-test it.`);
+      return;
+    }
+    const deckSnap = await get(at('secret/deck'));
+    const deck = ['fascist', 'fascist', 'fascist', ...asArray(deckSnap.val())];
+    await update(ref(db, `games/${room}`), {
+      'meta/fascistTrack': pos - 1,
+      'secret/deck': deck,
+    });
+    console.log(`[devbots] rigged ${power}: fascistTrack=${pos - 1}, 3 fascists planted on deck`);
+  }
+
   async function main() {
     const user = await ensureSignedIn();
     myUid = user.uid;
@@ -239,6 +277,16 @@ export function initDevBots({ room }) {
     if (fill5) fill5.addEventListener('click', () => fillTo(5).catch(e => alert(`Fill failed: ${e.message}`)));
     if (fill7) fill7.addEventListener('click', () => fillTo(7).catch(e => alert(`Fill failed: ${e.message}`)));
     if (rm) rm.addEventListener('click', () => removeBots().catch(e => alert(`Remove failed: ${e.message}`)));
+    const rigs = [
+      ['devRigPeek', 'policy_peek'],
+      ['devRigInvestigate', 'investigate_loyalty'],
+      ['devRigSpecial', 'special_election'],
+      ['devRigExecution', 'execution'],
+    ];
+    for (const [id, power] of rigs) {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', () => rigPower(power).catch(e => alert(`Rig failed: ${e.message}`)));
+    }
   }
 
   main().catch(e => console.warn('[devbots] init failed', e));
