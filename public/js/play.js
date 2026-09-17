@@ -15,6 +15,10 @@ let currentPlayers = {};
 let myRole = null;
 let myTeammates = [];
 let renderedForRound = {}; // avoid re-rendering the same one-shot UI repeatedly
+let roleRevealed = false; // tap-to-reveal: role starts facedown each session
+let revealedCards = {}; // "roundId:idx" / "peek:roundId:idx" -> true once flipped face-up
+const REDUCED_MOTION = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const FLIP_MS = REDUCED_MOTION ? 0 : 550;
 
 async function main() {
   const user = await ensureSignedIn();
@@ -138,12 +142,30 @@ function render() {
 
 function renderIdle() {
   const roleLabel = myRole === 'hitler' ? 'Hitler' : myRole[0].toUpperCase() + myRole.slice(1);
+  const whosTurn = describeWhosTurn();
+  const roleImg = myRole === 'hitler' ? 'role-hitler' : `role-${myRole}`;
+  if (!roleRevealed) {
+    // Genuine reveal: back first (shoulder-surf safe), tap to flip. Team stays hidden until then.
+    el('main').innerHTML = `
+      <div class="flip-scene center tappable" id="roleScene">
+        <div class="flip-inner flipped" id="roleFlip">
+          <img class="role-img flip-face" src="img/${roleImg}.png" alt="${roleLabel}" />
+          <img class="role-img flip-face flip-back" src="img/back-role.png" alt="Your secret role — tap to reveal" />
+        </div>
+      </div>
+      <p class="role-caption">Tap to reveal your role</p>
+      <p>${whosTurn}</p>
+    `;
+    el('roleScene').addEventListener('click', () => {
+      el('roleFlip').classList.remove('flipped');
+      setTimeout(() => { roleRevealed = true; render(); }, FLIP_MS);
+    });
+    return;
+  }
   let teamHtml = '';
   if (myTeammates.length) {
     teamHtml = `<p class="muted">Your team: ${myTeammates.map(t => escapeHtml(t.name)).join(', ')}</p>`;
   }
-  const whosTurn = describeWhosTurn();
-  const roleImg = myRole === 'hitler' ? 'role-hitler' : `role-${myRole}`;
   el('main').innerHTML = `
     <img class="role-img" src="img/${roleImg}.png" alt="${roleLabel}" />
     <p class="role-caption">${roleLabel}</p>
@@ -200,8 +222,14 @@ function renderVoting() {
   el('main').innerHTML = `
     <h2>${nameOf(currentMeta.presidentUid)} nominates ${nameOf(currentMeta.chancellorCandidateUid)}</h2>
     <div class="vote-buttons">
-      <button class="ballot ja" id="jaBtn"><img src="img/ballot-ja.png" alt="Ja!" /></button>
-      <button class="ballot nein" id="neinBtn"><img src="img/ballot-nein.png" alt="Nein!" /></button>
+      <button class="ballot ja" id="jaBtn"><div class="flip-scene"><div class="flip-inner" id="jaFlip">
+        <img src="img/ballot-ja.png" alt="Ja!" class="flip-face" />
+        <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
+      </div></div></button>
+      <button class="ballot nein" id="neinBtn"><div class="flip-scene"><div class="flip-inner" id="neinFlip">
+        <img src="img/ballot-nein.png" alt="Nein!" class="flip-face" />
+        <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
+      </div></div></button>
     </div>
   `;
   const castVote = async choice => {
@@ -212,8 +240,15 @@ function renderVoting() {
     renderedForRound[key] = true;
     render();
   };
-  el('jaBtn').addEventListener('click', () => castVote('ja'));
-  el('neinBtn').addEventListener('click', () => castVote('nein'));
+  // Play the card facedown with a flip, then record the vote when it lands.
+  const playBallot = (choice, flipId, otherBtnId) => {
+    const other = el(otherBtnId);
+    if (other) other.setAttribute('disabled', '');
+    el(flipId).classList.add('flipped');
+    setTimeout(() => castVote(choice), FLIP_MS);
+  };
+  el('jaBtn').addEventListener('click', () => playBallot('ja', 'jaFlip', 'neinBtn'));
+  el('neinBtn').addEventListener('click', () => playBallot('nein', 'neinFlip', 'jaBtn'));
 }
 
 function tileArray(v) {
@@ -245,13 +280,14 @@ async function renderPresidentDraw() {
   }
   el('main').innerHTML = `
     <h2>Discard one policy</h2>
-    <p class="muted">The remaining two go to the Chancellor.</p>
+    <p class="muted">Tap a card to peek, tap again to discard it. The remaining two go to the Chancellor.</p>
     <div class="policy-choice">
-      ${tiles.map((t, i) => `<img class="policy-tile policy-tile-img" src="img/tile-${t}.png" alt="${t} policy" data-idx="${i}" />`).join('')}
+      ${tiles.map((t, i) => policyFlipTile(t, i, roundId)).join('')}
     </div>
   `;
   document.querySelectorAll('.policy-tile').forEach(elm => {
     elm.addEventListener('click', async () => {
+      if (!revealPolicyTile(elm, roundId)) return; // first tap just reveals
       const idx = Number(elm.dataset.idx);
       const discarded = tiles[idx];
       const remaining = tiles.filter((_, i) => i !== idx);
@@ -269,6 +305,28 @@ async function renderPresidentDraw() {
 function tileImg(t, i) {
   const idx = i === undefined ? '' : ` data-idx="${i}"`;
   return `<img class="policy-tile policy-tile-img" src="img/tile-${escapeHtml(t)}.png" alt="${escapeHtml(t)} policy"${idx} />`;
+}
+
+// Facedown policy card for tap-to-reveal. First tap flips it face-up (recorded
+// in revealedCards so re-renders keep it up); the caller's second tap acts.
+function policyFlipTile(t, i, revealKey) {
+  const revealed = revealedCards[`${revealKey}:${i}`] ? '' : ' flipped';
+  const idx = i === undefined ? '' : ` data-idx="${i}"`;
+  return `<div class="policy-tile flip-scene tappable"${idx}>
+    <div class="flip-inner${revealed}">
+      <img class="policy-tile-img flip-face" src="img/tile-${escapeHtml(t)}.png" alt="${escapeHtml(t)} policy" />
+      <img class="policy-tile-img flip-face flip-back" src="img/back-tile.png" alt="Facedown policy — tap to peek" />
+    </div>
+  </div>`;
+}
+
+function revealPolicyTile(elm, revealKey) {
+  const key = `${revealKey}:${elm.dataset.idx}`;
+  if (revealedCards[key]) return true; // already face-up: caller should act
+  revealedCards[key] = true;
+  const inner = elm.querySelector('.flip-inner');
+  if (inner) inner.classList.remove('flipped');
+  return false;
 }
 
 function renderChancellorHand() {
@@ -296,14 +354,15 @@ function renderChancellorHand() {
     const canVeto = currentMeta.vetoUnlocked === true && !requested;
     el('main').innerHTML = `
       <h2>${tiles.length > 1 ? 'Enact one policy' : 'Enact the policy'}</h2>
-      <p class="muted">${tiles.length > 1 ? 'The other is discarded, unseen.' : 'Only one tile remained in the supply.'}</p>
+      <p class="muted">${tiles.length > 1 ? 'Tap a card to peek, tap again to enact it. The other is discarded, unseen.' : 'Only one tile remained in the supply.'}</p>
       <div class="policy-choice">
-        ${tiles.map((t, i) => tileImg(t, i)).join('')}
+        ${tiles.map((t, i) => policyFlipTile(t, i, roundId)).join('')}
       </div>
       ${canVeto ? `<button id="vetoBtn">I wish to veto this agenda</button>` : ''}
     `;
     document.querySelectorAll('.policy-tile').forEach(elm => {
       elm.addEventListener('click', async () => {
+        if (!revealPolicyTile(elm, roundId)) return; // first tap just reveals
         const idx = Number(elm.dataset.idx);
         const enacted = tiles[idx];
         const rest = tiles.filter((_, i) => i !== idx);
@@ -400,7 +459,17 @@ function renderInvestigate() {
     const result = snap.val();
     if (!result) return;
     const box = document.getElementById('investigateResult');
-    if (box) box.innerHTML = `<img class="role-img" src="img/role-${escapeHtml(String(result))}.png" alt="${escapeHtml(String(result))}" />`;
+    if (box) {
+      // Auto-flip the loyalty card as it arrives.
+      box.innerHTML = `<div class="flip-scene center"><div class="flip-inner flipped" id="investigateFlip">
+        <img class="role-img flip-face" src="img/role-${escapeHtml(String(result))}.png" alt="${escapeHtml(String(result))}" />
+        <img class="role-img flip-face flip-back" src="img/back-role.png" alt="" />
+      </div></div>`;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const flip = document.getElementById('investigateFlip');
+        if (flip) flip.classList.remove('flipped');
+      }));
+    }
   });
 }
 
@@ -430,12 +499,15 @@ function renderPolicyPeek() {
     if (!tiles) return;
     el('main').innerHTML = `
       <h2 class="power-title"><img class="power-icon" src="img/icon-peek.png" alt="" />Policy Peek</h2>
-      <p class="muted">Top 3 deck tiles (only you see this). Tap Done to resume the game.</p>
+      <p class="muted">Top 3 deck tiles (only you see this). Tap each card to peek, then Done.</p>
       <div class="policy-choice">
-        ${(Array.isArray(tiles) ? tiles : Object.values(tiles)).map(t => `<img class="policy-tile-img" src="img/tile-${escapeHtml(t)}.png" alt="${escapeHtml(t)} policy" />`).join('')}
+        ${(Array.isArray(tiles) ? tiles : Object.values(tiles)).map((t, i) => policyFlipTile(t, i, `peek:${roundId}`)).join('')}
       </div>
       <button id="peekDoneBtn">Done</button>
     `;
+    document.querySelectorAll('.policy-tile').forEach(elm => {
+      elm.addEventListener('click', () => revealPolicyTile(elm, `peek:${roundId}`));
+    });
     document.getElementById('peekDoneBtn').addEventListener('click', async () => {
       await set(ref(db, `games/${room}/secret/executive/${roundId}/policyPeekSeen`), true);
       el('main').innerHTML = `<p class="muted">Resuming game...</p>`;
