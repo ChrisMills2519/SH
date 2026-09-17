@@ -1,0 +1,10 @@
+{
+  "name": "secret-hitler-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unofficial digital play aid for Secret Hitler (CC BY-NC-SA 4.0, non-commercial).",
+  "scripts": {
+    "dev": "npx http-server public -p 8080",
+    "deploy": "npx firebase-tools deploy --only hosting"
+  }
+}

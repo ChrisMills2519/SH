@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Secret Hitler — Board</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="board-wrap">
+    <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room <span id="roomCode"></span></span></h1>
+    <p class="muted">Phase: <span id="phaseLabel"></span></p>
+
+    <div id="gameOverBanner" class="role-banner" style="display:none"></div>
+
+    <section id="lobbyPanel">
+      <div class="qr-box">
+        <div id="qrBox" aria-label="QR code to join"></div>
+        <p class="muted" id="joinUrl"></p>
+      </div>
+      <p><strong id="playerCount">0</strong> players joined: <span id="playerNames"></span></p>
+      <p class="muted">Need 5–10 players.</p>
+      <button id="startBtn" disabled>Start Game</button>
+    </section>
+
+    <section id="gamePanel" style="display:none">
+      <div class="tracks">
+        <div class="track">
+          <h3>Liberal Policies</h3>
+          <div class="track-slots" id="liberalSlots"></div>
+        </div>
+        <div class="track">
+          <h3>Fascist Policies</h3>
+          <div class="track-slots" id="fascistSlots"></div>
+        </div>
+        <div class="track">
+          <h3>Election Tracker</h3>
+          <p id="electionTrackerLabel"></p>
+        </div>
+      </div>
+
+      <h3>Players</h3>
+      <div class="player-list" id="playerChips"></div>
+    </section>
+  </div>
+
+  <script src="js/vendor/qrcode.min.js"></script>
+  <script type="module" src="js/board.js"></script>
+</body>
+</html>

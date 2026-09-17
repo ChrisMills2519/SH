@@ -1,0 +1,237 @@
+:root {
+  --bg: #16181c;
+  --panel: #22252b;
+  --liberal: #3b6fd6;
+  --fascist: #a3282f;
+  --hitler: #6b0f16;
+  --text: #f2f2f2;
+  --muted: #9aa0a8;
+  --accent: #d6b13b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body.centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.card {
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 28px;
+  max-width: 420px;
+  width: 100%;
+}
+
+h1 { margin-top: 0; color: var(--accent); }
+
+section { margin: 20px 0; }
+
+input {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin: 8px 0;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #1b1d22;
+  color: var(--text);
+  font-size: 16px;
+}
+
+button {
+  padding: 12px 18px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #1b1d22;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  width: 100%;
+}
+
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.muted { color: var(--muted); font-size: 14px; }
+.error { color: #ff8080; min-height: 20px; }
+
+/* Board layout */
+.board-wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.tracks {
+  display: flex;
+  gap: 24px;
+  margin: 24px 0;
+}
+
+.track {
+  flex: 1;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.track h3 { margin-top: 0; }
+
+.track-slots { display: flex; gap: 8px; }
+
+.slot {
+  width: 40px;
+  height: 56px;
+  border-radius: 6px;
+  border: 2px solid #444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  text-align: center;
+}
+
+.slot.filled.liberal { background: var(--liberal); border-color: var(--liberal); }
+.slot.filled.fascist { background: var(--fascist); border-color: var(--fascist); }
+
+.player-list { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.player-chip {
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: var(--panel);
+  border: 2px solid #444;
+}
+
+.player-chip.president { border-color: var(--accent); }
+.player-chip.chancellor { border-color: #6fd68b; }
+.player-chip.dead { opacity: 0.35; text-decoration: line-through; }
+
+.role-banner {
+  text-align: center;
+  padding: 40px 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.role-banner.liberal { background: var(--liberal); }
+.role-banner.fascist { background: var(--fascist); }
+.role-banner.hitler { background: var(--hitler); }
+.role-banner.dead { background: #33373d; color: var(--muted); }
+
+.policy-choice {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin: 20px 0;
+}
+
+.policy-tile {
+  width: 100px;
+  height: 140px;
+  border-radius: 8px;
+  border: 3px solid #444;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.policy-tile.liberal { background: var(--liberal); }
+.policy-tile.fascist { background: var(--fascist); }
+.policy-tile:hover { border-color: var(--accent); }
+
+.qr-box { text-align: center; margin: 20px 0; }
+.qr-box img { background: #fff; padding: 10px; border-radius: 8px; }
+
+.vote-buttons { display: flex; gap: 12px; }
+.vote-buttons button.ja { background: #4a9e5c; }
+.vote-buttons button.nein { background: var(--fascist); color: #fff; }
+
+/* Official art assets (public/img/) */
+.slot-img {
+  width: 40px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.role-img {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  margin: 0 auto 8px;
+  border-radius: 12px;
+}
+
+.role-caption {
+  text-align: center;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+.policy-tile-img {
+  width: 100px;
+  height: 140px;
+  border-radius: 8px;
+  border: 3px solid #444;
+  object-fit: cover;
+}
+
+img.policy-tile.policy-tile-img {
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.policy-tile-img:hover { border-color: var(--accent); }
+
+.vote-buttons button.ballot {
+  background: none;
+  padding: 0;
+}
+
+.vote-buttons button.ballot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.logo {
+  display: block;
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+  margin: 0 auto;
+}
+
+.logo-small {
+  display: inline-block;
+  max-width: 180px;
+  margin: 0;
+  vertical-align: middle;
+}
+
+/* Small displays: stack the board tracks instead of squeezing them. */
+@media (max-width: 700px) {
+  .tracks { flex-direction: column; }
+  .board-wrap { padding: 16px; }
+  .policy-tile-img { width: 84px; height: 118px; }
+  .role-img { max-width: 200px; }
+}

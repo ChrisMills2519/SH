@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Secret Hitler</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="centered">
+  <main class="card">
+    <h1><img class="logo" src="img/logo.png" alt="Secret Hitler" /></h1>
+    <p class="muted">Unofficial digital play aid. Fan adaptation, non-commercial, under
+      <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener">CC BY-NC-SA 4.0</a>.
+      Original game by Mike Boxleiter, Tommy Maranges &amp; Mac Schubert —
+      <a href="https://www.secrethitler.com" target="_blank" rel="noopener">secrethitler.com</a>.</p>
+
+    <section>
+      <h2>Host on the shared display</h2>
+      <button id="hostBtn">Host a Game</button>
+    </section>
+
+    <section>
+      <h2>Join on your phone</h2>
+      <input id="nameInput" type="text" placeholder="Your name" maxlength="20" />
+      <input id="roomInput" type="text" placeholder="Room code" maxlength="6" style="text-transform:uppercase" />
+      <button id="joinBtn">Join Game</button>
+    </section>
+
+    <p id="error" class="error"></p>
+  </main>
+
+  <script type="module">
+    function randomRoomCode() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
+      let code = '';
+      for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+      return code;
+    }
+
+    document.getElementById('hostBtn').addEventListener('click', () => {
+      const room = randomRoomCode();
+      window.location.href = `board.html?room=${room}&new=1`;
+    });
+
+    document.getElementById('joinBtn').addEventListener('click', () => {
+      const name = document.getElementById('nameInput').value.trim();
+      const room = document.getElementById('roomInput').value.trim().toUpperCase();
+      const error = document.getElementById('error');
+      if (!name) { error.textContent = 'Enter a name.'; return; }
+      if (!room) { error.textContent = 'Enter a room code.'; return; }
+      window.location.href = `play.html?room=${room}&name=${encodeURIComponent(name)}`;
+    });
+  </script>
+</body>
+</html>
