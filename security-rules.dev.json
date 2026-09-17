@@ -107,7 +107,8 @@
           "$roundId": {
             ".read": "auth != null",
             "$uid": {
-              ".write": "auth != null && auth.uid === $uid && !data.exists()"
+              // DEV ONLY: host may cast bot votes.
+              ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()) && !data.exists()"
             }
           }
         },

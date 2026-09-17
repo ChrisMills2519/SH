@@ -54,12 +54,12 @@ export function initDevBots({ room }) {
     if (phase === 'nomination' && bots().includes(meta.presidentUid) && !meta.chancellorCandidateUid) {
       const key = `nom-${roundId}`;
       if (!acted.has(key)) {
-        acted.add(key);
         const opts = living().filter(uid => uid !== meta.presidentUid);
         if (opts.length) {
           await sleep(800);
           await update(at('meta'), { chancellorCandidateUid: pick(opts) });
         }
+        acted.add(key);
       }
       return;
     }
@@ -71,7 +71,6 @@ export function initDevBots({ room }) {
         const cast = castSnap.val() || {};
         const missing = bots().filter(uid => living().includes(uid) && !cast[uid]);
         if (missing.length) {
-          acted.add(key);
           await sleep(800);
           const updates = {};
           missing.forEach(uid => {
@@ -79,6 +78,7 @@ export function initDevBots({ room }) {
             updates[`votesCast/${roundId}/${uid}`] = true;
           });
           await update(ref(db, `games/${room}`), updates);
+          acted.add(key);
         }
       }
       return;
@@ -91,7 +91,6 @@ export function initDevBots({ room }) {
         const handSnap = await get(at(`secret/legislative/${roundId}/chancellorHand`));
         const tiles = asArray(drawSnap.val());
         if (tiles.length && !handSnap.val()) {
-          acted.add(key);
           await sleep(800);
           const idx = Math.floor(Math.random() * tiles.length);
           const remaining = tiles.filter((_, i) => i !== idx);
@@ -101,6 +100,7 @@ export function initDevBots({ room }) {
             [`secret/legislative/${roundId}/chancellorHand`]: remaining,
             'secret/discard': discard,
           });
+          acted.add(key);
         }
       }
       return;
@@ -113,7 +113,6 @@ export function initDevBots({ room }) {
         const enactedSnap = await get(at(`secret/legislative/${roundId}/enactedTile`));
         const tiles = asArray(handSnap.val());
         if (tiles.length && !enactedSnap.val()) {
-          acted.add(key);
           await sleep(800);
           const idx = Math.floor(Math.random() * tiles.length);
           const discSnap = await get(at('secret/discard'));
@@ -122,6 +121,7 @@ export function initDevBots({ room }) {
             [`secret/legislative/${roundId}/enactedTile`]: tiles[idx],
             'secret/discard': discard,
           });
+          acted.add(key);
         }
       }
       return;
@@ -132,32 +132,32 @@ export function initDevBots({ room }) {
       if (power === 'execution' && !meta.executionTarget) {
         const key = `exec-${roundId}`;
         if (!acted.has(key)) {
-          acted.add(key);
           const opts = living().filter(uid => uid !== meta.presidentUid);
           if (opts.length) {
             await sleep(800);
             await update(at('meta'), { executionTarget: pick(opts) });
+            acted.add(key);
           }
         }
       } else if (power === 'investigate_loyalty' && !meta.investigateTarget) {
         const key = `inv-${roundId}`;
         if (!acted.has(key)) {
-          acted.add(key);
           const done = meta.investigatedUids || {};
           const opts = living().filter(uid => uid !== meta.presidentUid && !done[uid]);
           if (opts.length) {
             await sleep(800);
             await update(at('meta'), { investigateTarget: pick(opts) });
+            acted.add(key);
           }
         }
       } else if (power === 'special_election' && !meta.specialElectionTarget) {
         const key = `spec-${roundId}`;
         if (!acted.has(key)) {
-          acted.add(key);
           const opts = living().filter(uid => uid !== meta.presidentUid);
           if (opts.length) {
             await sleep(800);
             await update(at('meta'), { specialElectionTarget: pick(opts) });
+            acted.add(key);
           }
         }
       } else if (power === 'policy_peek') {
@@ -166,10 +166,10 @@ export function initDevBots({ room }) {
           const peekSnap = await get(at(`secret/executive/${roundId}/policyPeek`));
           const seenSnap = await get(at(`secret/executive/${roundId}/policyPeekSeen`));
           if (peekSnap.val() && seenSnap.val() !== true) {
-            acted.add(key);
             await sleep(800);
             console.log(`[devbots] bot president peeked: ${JSON.stringify(peekSnap.val())}`);
             await set(at(`secret/executive/${roundId}/policyPeekSeen`), true);
+            acted.add(key);
           }
         }
       }
