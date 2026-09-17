@@ -32,7 +32,7 @@ export function initDevBots({ room }) {
   const living = () => (meta.playerOrder || [])
     .filter(uid => players[uid] && players[uid].alive !== false);
 
-  const nameOf = uid => (players[uid] && players[uid].name) || uid.slice(0, 8);
+  const nameOf = uid => (uid && players[uid] && players[uid].name) || (uid ? String(uid).slice(0, 8) : '?');
 
   function react() {
     if (busy) { queued = true; return; }
@@ -180,7 +180,7 @@ export function initDevBots({ room }) {
     const snap = await get(at('players'));
     const current = snap.val() || {};
     const have = Object.keys(current).length;
-    console.log(`[devbots] ${have} seats, filling to ${n} as ${nameOf(meta.presidentUid)}`);
+    console.log(`[devbots] ${have} seats, filling to ${n}`);
     for (let i = have; i < n; i++) {
       const uid = newBotUid();
       await set(at(`players/${uid}`), {
