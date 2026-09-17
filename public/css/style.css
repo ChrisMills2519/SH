@@ -74,38 +74,6 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 24px;
 }
 
-.tracks {
-  display: flex;
-  gap: 24px;
-  margin: 24px 0;
-}
-
-.track {
-  flex: 1;
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 16px;
-}
-
-.track h3 { margin-top: 0; }
-
-.track-slots { display: flex; gap: 8px; }
-
-.slot {
-  width: 40px;
-  height: 56px;
-  border-radius: 6px;
-  border: 2px solid #444;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  text-align: center;
-}
-
-.slot.filled.liberal { background: var(--liberal); border-color: var(--liberal); }
-.slot.filled.fascist { background: var(--fascist); border-color: var(--fascist); }
-
 .player-list { display: flex; flex-wrap: wrap; gap: 12px; }
 
 .player-chip {
@@ -163,13 +131,6 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .vote-buttons button.nein { background: var(--fascist); color: #fff; }
 
 /* Official art assets (public/img/) */
-.slot-img {
-  width: 40px;
-  height: 56px;
-  border-radius: 6px;
-  object-fit: cover;
-}
-
 .role-img {
   display: block;
   width: 100%;
@@ -228,17 +189,27 @@ img.policy-tile.policy-tile-img {
   vertical-align: middle;
 }
 
-/* Sourced artwork: official board reference + CC0 power icons */
-.board-art-details { margin-top: 12px; }
-.board-art-details summary { cursor: pointer; }
-.board-art {
-  display: block;
-  width: 100%;
-  height: auto;
-  margin-top: 8px;
-  border-radius: 8px;
-  border: 1px solid #444;
+/* Laid-out boards (TV): policy tiles + tracker pips overlaid on the art. */
+.boards { display: flex; flex-direction: column; gap: 16px; margin: 24px 0; }
+.board-stage { position: relative; line-height: 0; }
+.board-img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.tile-layer, .pip-layer { position: absolute; inset: 0; pointer-events: none; }
+.tile-spot { position: absolute; line-height: 0; opacity: 0; transform: scale(0.9); }
+.tile-spot.filled { opacity: 1; transform: none; }
+.tile-spot.filled img { animation: tile-in 0.3s ease-out; }
+.tile-spot img { width: 100%; height: 100%; display: block; border-radius: 4px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.55); }
+@keyframes tile-in {
+  from { transform: translateY(-8px) scale(1.04); }
+  to { transform: none; }
 }
+.tracker-pip {
+  position: absolute;
+  width: 2.6%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+.tracker-pip.lit { background: #ffd75e; box-shadow: 0 0 10px 3px rgba(255, 215, 94, 0.8); }
 
 .power-title {
   display: flex;
@@ -264,9 +235,8 @@ img.policy-tile.policy-tile-img {
   vertical-align: middle;
 }
 
-/* Small displays: stack the board tracks instead of squeezing them. */
+/* Small displays: boards scale down (overlays are %-based); tighten padding. */
 @media (max-width: 700px) {
-  .tracks { flex-direction: column; }
   .board-wrap { padding: 16px; }
   .policy-tile-img { width: 84px; height: 118px; }
   .role-img { max-width: 200px; }
@@ -294,6 +264,7 @@ div.policy-tile .flip-face { width: 100%; height: 100%; }
 
 @media (prefers-reduced-motion: reduce) {
   .flip-inner { transition: none; }
+  .tile-spot.filled img { animation: none; }
 }
 
 @media (max-width: 700px) {

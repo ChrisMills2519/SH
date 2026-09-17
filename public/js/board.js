@@ -765,9 +765,7 @@ function render() {
     return;
   }
 
-  el('liberalSlots').innerHTML = renderTrack(currentMeta.liberalTrack || 0, 5, 'liberal');
-  el('fascistSlots').innerHTML = renderTrack(currentMeta.fascistTrack || 0, 6, 'fascist');
-  el('electionTrackerLabel').textContent = `${currentMeta.electionTracker || 0} / 3`;
+  paintBoardOverlays();
 
   // Show the official Fascist board matching the player-count bracket
   // (same brackets as the executive-power table in game-logic.js).
@@ -806,16 +804,47 @@ function render() {
   }
 }
 
-function renderTrack(filled, total, kind) {
-  let html = '';
-  for (let i = 0; i < total; i++) {
-    if (i < filled) {
-      html += `<img class="slot-img" src="img/tile-${kind}.png" alt="${kind} policy" />`;
-    } else {
-      html += `<div class="slot"></div>`;
-    }
+// Board overlay geometry — tile/tracker positions as % of the board image,
+// calibrated from the PNGs (dotted-zone runs + pip-ring centroids, Sep 2026).
+// All three fascist variants share identical track geometry.
+const TILE_TOP_PCT = 30.5; // top edge of policy tiles (both boards)
+const TILE_ASPECT = 320 / 397; // tile-liberal/fascist.png w/h
+const LIB_SLOT_LEFT = [17.81, 30.94, 43.44, 56.56, 71.5];
+const LIB_SLOT_WIDTH = [12.5, 12.5, 12.5, 12.5, 14.5]; // slot 5 covers the dove panel
+const FASC_SLOT_LEFT = [10.6, 24.75, 37.9, 50.4, 62.85, 75.45];
+const FASC_SLOT_WIDTH = 13;
+const TRACKER_PIP_X = [36.25, 44.94, 53.59, 62.28];
+const TRACKER_PIP_Y = 79.39;
+
+// Build overlay divs once per layer, then flip .filled/.lit per render.
+// Pure function of currentMeta — no new Firebase reads.
+function paintBoardOverlays() {
+  paintTileLayer('liberalTiles', LIB_SLOT_LEFT, LIB_SLOT_WIDTH, 'liberal', currentMeta.liberalTrack || 0);
+  paintTileLayer('fascistTiles', FASC_SLOT_LEFT, FASC_SLOT_WIDTH, 'fascist', currentMeta.fascistTrack || 0);
+  paintTrackerPips(currentMeta.electionTracker || 0);
+}
+
+function paintTileLayer(layerId, lefts, widths, kind, filled) {
+  const layer = el(layerId);
+  if (!layer) return;
+  const w = i => (Array.isArray(widths) ? widths[i] : widths);
+  if (layer.childElementCount !== lefts.length) {
+    layer.innerHTML = lefts.map((left, i) =>
+      `<div class="tile-spot" style="left:${left}%;width:${w(i)}%;top:${TILE_TOP_PCT}%;aspect-ratio:${TILE_ASPECT}"><img src="img/tile-${kind}.png" alt="${kind} policy" draggable="false" /></div>`
+    ).join('');
   }
-  return html;
+  [...layer.children].forEach((spot, i) => spot.classList.toggle('filled', i < filled));
+}
+
+function paintTrackerPips(tracker) {
+  const layer = el('trackerPips');
+  if (!layer) return;
+  if (layer.childElementCount !== TRACKER_PIP_X.length) {
+    layer.innerHTML = TRACKER_PIP_X.map(x =>
+      `<div class="tracker-pip" style="left:${x}%;top:${TRACKER_PIP_Y}%"></div>`
+    ).join('');
+  }
+  [...layer.children].forEach((pip, i) => pip.classList.toggle('lit', i < tracker));
 }
 
 function escapeHtml(str) {
