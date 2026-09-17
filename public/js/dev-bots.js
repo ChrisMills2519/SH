@@ -1,5 +1,5 @@
 // DEV-ONLY — solo-testing bots. DELETE this file (plus the marked
-// DEV-ONLY blocks in board.html/board.js, security-rules.dev.json,
+// DEV-ONLY blocks in board.html/board.js/index.html, security-rules.dev.json,
 // firebase.dev.json, and the README dev section) before game night.
 //
 // Bots run inside the board page (the trusted host) and act for seats

@@ -32,6 +32,14 @@
     </section>
 
     <p id="error" class="error"></p>
+
+    <!-- DEV-ONLY START: solo-testing shortcut. Delete this section before game night. -->
+    <section>
+      <h2>DEV testing only</h2>
+      <button id="devBtn">Solo dev test (board + bots)</button>
+      <p class="muted">Opens a new room's board with <code>?dev=1</code> (bot panel + rig buttons). Needs dev database rules.</p>
+    </section>
+    <!-- DEV-ONLY END -->
   </main>
 
   <script type="module">
@@ -45,6 +53,12 @@
     document.getElementById('hostBtn').addEventListener('click', () => {
       const room = randomRoomCode();
       window.location.href = `board.html?room=${room}&new=1`;
+    });
+
+    // DEV-ONLY: delete with the section above before game night.
+    document.getElementById('devBtn').addEventListener('click', () => {
+      const room = randomRoomCode();
+      window.location.href = `board.html?room=${room}&new=1&dev=1`;
     });
 
     document.getElementById('joinBtn').addEventListener('click', () => {

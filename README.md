@@ -84,6 +84,7 @@ seat), and there's no spectator mode beyond the executed-player banner.
   --project secreth-10e81`. **Revert right after testing** with `firebase deploy --only
   database --project secreth-10e81` (prod `security-rules.json`).
 - Removal checklist: delete `public/js/dev-bots.js`, `security-rules.dev.json`,
-  `firebase.dev.json`, the `DEV-ONLY` blocks in `public/board.html` + `public/js/board.js`,
+  `firebase.dev.json`, the `DEV-ONLY` blocks in `public/board.html` + `public/js/board.js` +
+  `public/index.html`,
   and this section. Then redeploy database + hosting.
 <!-- DEV-ONLY END -->
