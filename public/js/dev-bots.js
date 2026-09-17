@@ -113,6 +113,22 @@ export function initDevBots({ room }) {
         const enactedSnap = await get(at(`secret/legislative/${roundId}/enactedTile`));
         const tiles = asArray(handSnap.val());
         if (tiles.length && !enactedSnap.val()) {
+          const reqSnap = await get(at(`secret/legislative/${roundId}/vetoRequested`));
+          const requested = reqSnap.val() === true;
+          // DEV fast-forward: bot chancellors veto 25% of the time once unlocked.
+          if (meta.vetoUnlocked === true && !requested && Math.random() < 0.25) {
+            await sleep(800);
+            await set(at(`secret/legislative/${roundId}/vetoRequested`), true);
+            return;
+          }
+          if (requested) {
+            const decSnap = await get(at(`secret/legislative/${roundId}/vetoDecision`));
+            if (decSnap.val() === 'refused') {
+              // Fall through and enact below.
+            } else {
+              return; // waiting for the president's decision
+            }
+          }
           await sleep(800);
           const idx = Math.floor(Math.random() * tiles.length);
           const discSnap = await get(at('secret/discard'));
@@ -121,6 +137,21 @@ export function initDevBots({ room }) {
             [`secret/legislative/${roundId}/enactedTile`]: tiles[idx],
             'secret/discard': discard,
           });
+          acted.add(key);
+        }
+      }
+      // Fall through: a bot president may also owe a veto decision this step.
+    }
+
+    // Bot presidents decide on human-requested vetoes 50/50.
+    if (phase === 'legislative_chancellor' && bots().includes(meta.presidentUid)) {
+      const key = `vetodec-${roundId}`;
+      if (!acted.has(key)) {
+        const reqSnap = await get(at(`secret/legislative/${roundId}/vetoRequested`));
+        const decSnap = await get(at(`secret/legislative/${roundId}/vetoDecision`));
+        if (reqSnap.val() === true && !decSnap.val()) {
+          await sleep(800);
+          await set(at(`secret/legislative/${roundId}/vetoDecision`), Math.random() < 0.5 ? 'agreed' : 'refused');
           acted.add(key);
         }
       }

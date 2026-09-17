@@ -46,6 +46,12 @@ export function executivePowerFor(playerCount, fascistTrackPosition) {
   return POWER_TABLES[bracketFor(playerCount)][fascistTrackPosition] ?? null;
 }
 
+// Veto unlocks once 5 fascist policies have been enacted, for all
+// legislative sessions afterwards (official Veto Power rule).
+export function vetoUnlocked(fascistTrack) {
+  return (fascistTrack || 0) >= 5;
+}
+
 // --- Policy deck -----------------------------------------------------------
 // 6 Liberal tiles, 11 Fascist tiles, per the physical game.
 export function freshDeck() {

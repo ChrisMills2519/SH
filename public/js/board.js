@@ -3,7 +3,7 @@ import {
   ref, get, set, update, onValue, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 import {
-  assignRoles, freshDeck, executivePowerFor,
+  assignRoles, freshDeck, executivePowerFor, vetoUnlocked,
   ineligibleChancellorCandidates, checkWin, checkExecutionWin,
 } from './game-logic.js';
 
@@ -123,7 +123,7 @@ function handlePhaseEnter(phase) {
   if (phase === 'nomination') watchForNomination();
   if (phase === 'election') watchForVotes();
   if (phase === 'legislative_president') watchForPresidentDiscard();
-  if (phase === 'legislative_chancellor') watchForChancellorEnact();
+  if (phase === 'legislative_chancellor') { watchForChancellorEnact(); watchForVeto(); }
   if (phase === 'executive_action') watchForExecutiveAction();
 }
 
@@ -131,15 +131,27 @@ function alivePlayers() {
   return (currentMeta.playerOrder || []).filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false);
 }
 
+// Replay guard: Firebase re-fires watchers with already-completed state on
+// reconnects and fresh subscriptions. Every phase action below re-reads meta
+// first and no-ops unless the game is still in the stage it subscribed for —
+// without this, a replayed election/enactment deals duplicate tiles and
+// silently destroys them by overwriting history nodes.
+async function freshMeta() {
+  return (await get(metaRef)).val() || {};
+}
+
 function watchForNomination() {
   // NB: onValue can invoke the callback synchronously with cached data,
   // before `unsub` is assigned — hence the done-flag + guarded unsub.
+  const entryRound = currentMeta.roundId || 0;
   let done = false;
   let unsub = null;
   unsub = onValue(ref(db, `games/${room}/meta/chancellorCandidateUid`), async snap => {
     if (done) return;
     const candidate = snap.val();
     if (!candidate) return;
+    const m = await freshMeta();
+    if (m.phase !== 'nomination' || (m.roundId || 0) !== entryRound) return;
     done = true;
     if (typeof unsub === 'function') unsub();
     const roundId = (currentMeta.roundId || 0) + 1;
@@ -157,6 +169,10 @@ function watchForVotes() {
     if (done) return;
     const cast = snap.val() || {};
     if (Object.keys(cast).length < alive.length) return;
+    const m = await freshMeta();
+    if (m.phase !== 'election' || (m.roundId || 0) !== roundId) return;
+    const revealed = await get(ref(db, `games/${room}/votesRevealed/${roundId}`));
+    if (revealed.val() === true) return;
     done = true;
     if (typeof unsub === 'function') unsub();
     await set(ref(db, `games/${room}/votesRevealed/${roundId}`), true);
@@ -172,20 +188,8 @@ async function resolveElection(majority) {
   if (!majority) {
     const tracker = (currentMeta.electionTracker || 0) + 1;
     if (tracker >= 3) {
-      // Chaos: top deck tile auto-enacts, tracker resets, term limits forgotten.
-      const drawn = await takeTiles(1);
-      const tile = drawn[0];
-      const trackField = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
-      const newVal = (currentMeta[trackField] || 0) + 1;
-      await update(ref(db, `games/${room}`), {
-        [`meta/${trackField}`]: newVal,
-        'meta/electionTracker': 0,
-        'meta/chancellorCandidateUid': null,
-        'meta/presidentUidLast': null,
-        'meta/chancellorUidLast': null,
-      });
-      const win = checkWin({ liberalTrack: trackField === 'liberalTrack' ? newVal : currentMeta.liberalTrack, fascistTrack: trackField === 'fascistTrack' ? newVal : currentMeta.fascistTrack });
-      if (win) return endGame(win);
+      const win = await runChaos();
+      if (win) return;
     } else {
       await update(metaRef, { electionTracker: tracker, chancellorCandidateUid: null });
     }
@@ -223,6 +227,31 @@ function shuffleReshuffle(arr) {
   return a;
 }
 
+// Chaos (frustrated populace): top deck tile auto-enacts, tracker resets,
+// term limits forgotten. Shared by failed-election chaos and veto-at-tracker-3.
+// Returns the win object (already applied via endGame), or null to continue.
+async function runChaos() {
+  const drawn = await takeTiles(1);
+  const tile = drawn[0];
+  const trackField = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
+  const newVal = (currentMeta[trackField] || 0) + 1;
+  const fascistNow = trackField === 'fascistTrack' ? newVal : (currentMeta.fascistTrack || 0);
+  await update(ref(db, `games/${room}`), {
+    [`meta/${trackField}`]: newVal,
+    'meta/electionTracker': 0,
+    'meta/chancellorCandidateUid': null,
+    'meta/presidentUidLast': null,
+    'meta/chancellorUidLast': null,
+    'meta/vetoUnlocked': vetoUnlocked(fascistNow),
+  });
+  const win = checkWin({ liberalTrack: trackField === 'liberalTrack' ? newVal : currentMeta.liberalTrack, fascistTrack: fascistNow });
+  if (win) {
+    await endGame(win);
+    return win;
+  }
+  return null;
+}
+
 // Draw n tiles, reshuffling the discard pile in when the deck runs short.
 // Returns the drawn tiles and persists the new deck/discard. Used for every
 // consuming draw (legislative, chaos) so an empty deck can never enact
@@ -242,6 +271,13 @@ async function takeTiles(n) {
     'secret/deck': deck.slice(n),
     'secret/discard': discard,
   });
+  // Tile-conservation self-check: deck + discard + enacted must always equal
+  // the 17 physical tiles. A mismatch means a duplicate deal orphaned tiles
+  // (see freshMeta replay guards) — loud in console instead of a silent wedge.
+  const enacted = (currentMeta.liberalTrack || 0) + (currentMeta.fascistTrack || 0);
+  if (deck.slice(n).length + discard.length + enacted !== 17) {
+    console.warn(`[tiles] conservation check failed: deck=${deck.slice(n).length} discard=${discard.length} enacted=${enacted} (want 17 total)`);
+  }
   return tiles;
 }
 
@@ -307,9 +343,11 @@ function watchForPresidentDiscard() {
   const roundId = currentMeta.roundId;
   let done = false;
   let unsub = null;
-  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`), snap => {
+  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`), async snap => {
     if (done) return;
     if (!snap.val()) return;
+    const m = await freshMeta();
+    if (m.phase !== 'legislative_president' || (m.roundId || 0) !== roundId) return;
     done = true;
     if (typeof unsub === 'function') unsub();
     update(metaRef, { phase: 'legislative_chancellor' });
@@ -324,11 +362,15 @@ function watchForChancellorEnact() {
     if (done) return;
     const tile = snap.val();
     if (!tile) return;
+    const m = await freshMeta();
+    if (m.phase !== 'legislative_chancellor' || (m.roundId || 0) !== roundId) return;
     done = true;
     if (typeof unsub === 'function') unsub();
     const field = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
     const newVal = (currentMeta[field] || 0) + 1;
-    await update(metaRef, { [field]: newVal });
+    // Veto unlocks permanently once the 5th fascist policy is enacted.
+    const unlock = field === 'fascistTrack' && vetoUnlocked(newVal);
+    await update(metaRef, { [field]: newVal, ...(unlock ? { vetoUnlocked: true } : {}) });
 
     const win = checkWin({
       liberalTrack: field === 'liberalTrack' ? newVal : currentMeta.liberalTrack,
@@ -347,7 +389,51 @@ function watchForChancellorEnact() {
   });
 }
 
+// Veto (official rule, unlocked at 5 fascist policies): the Chancellor asks,
+// the President consents or refuses. Agreed → both tiles discarded, tracker
+// +1 (chaos at 3, shared helper), presidency passes. Refused → request
+// cleared, Chancellor must enact normally.
+function watchForVeto() {
+  const roundId = currentMeta.roundId;
+  let done = false;
+  let unsub = null;
+  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/vetoDecision`), async snap => {
+    if (done) return;
+    const decision = snap.val();
+    if (!decision) return;
+    const m = await freshMeta();
+    if (m.phase !== 'legislative_chancellor' || (m.roundId || 0) !== roundId) return;
+    done = true;
+    if (typeof unsub === 'function') unsub();
+    if (decision === 'refused') {
+      await update(ref(db, `games/${room}`), {
+        [`secret/legislative/${roundId}/vetoRequested`]: null,
+        [`secret/legislative/${roundId}/vetoDecision`]: null,
+      });
+      return;
+    }
+    if (decision !== 'agreed') return;
+    const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
+    const hand = handSnap.val();
+    const tiles = Array.isArray(hand) ? hand : Object.values(hand || {});
+    const discSnap = await get(ref(db, `games/${room}/secret/discard`));
+    const discVal = discSnap.val();
+    const discard = (Array.isArray(discVal) ? discVal : Object.values(discVal || {})).concat(tiles);
+    const tracker = (currentMeta.electionTracker || 0) + 1;
+    await update(ref(db, `games/${room}`), { 'secret/discard': discard });
+    if (tracker >= 3) {
+      const win = await runChaos();
+      if (win) return;
+      advancePresidency(false);
+      return;
+    }
+    await update(metaRef, { electionTracker: tracker });
+    advancePresidency();
+  });
+}
+
 async function watchForExecutiveAction() {
+
   const power = currentMeta.pendingPower;
   if (power === 'execution') {
     let done = false;
@@ -356,6 +442,8 @@ async function watchForExecutiveAction() {
       if (done) return;
       const target = snap.val();
       if (!target) return;
+      const m = await freshMeta();
+      if (m.phase !== 'executive_action' || m.pendingPower !== 'execution') return;
       done = true;
       if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
@@ -376,6 +464,8 @@ async function watchForExecutiveAction() {
       if (done) return;
       const target = snap.val();
       if (!target) return;
+      const m = await freshMeta();
+      if (m.phase !== 'executive_action' || m.pendingPower !== 'investigate_loyalty') return;
       done = true;
       if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
@@ -397,6 +487,8 @@ async function watchForExecutiveAction() {
       if (done) return;
       const target = snap.val();
       if (!target) return;
+      const m = await freshMeta();
+      if (m.phase !== 'executive_action' || m.pendingPower !== 'special_election') return;
       done = true;
       if (typeof unsub === 'function') unsub();
       const enacting = currentMeta.presidentUid;
@@ -433,6 +525,8 @@ async function watchForExecutiveAction() {
     unsub = onValue(ref(db, `games/${room}/secret/executive/${currentMeta.roundId}/policyPeekSeen`), async snap => {
       if (peekDone) return;
       if (snap.val() !== true) return;
+      const m = await freshMeta();
+      if (m.phase !== 'executive_action' || m.pendingPower !== 'policy_peek') return;
       peekDone = true;
       if (typeof unsub === 'function') unsub();
       await update(ref(db, `games/${room}`), { 'meta/pendingPower': null });

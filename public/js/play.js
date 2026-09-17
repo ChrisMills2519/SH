@@ -108,6 +108,11 @@ function render() {
     return;
   }
 
+  if (phase === 'legislative_chancellor' && currentMeta.presidentUid === myUid) {
+    renderVetoConsent();
+    return;
+  }
+
   if (phase === 'executive_action' && currentMeta.pendingPower === 'execution' && currentMeta.presidentUid === myUid) {
     renderExecution();
     return;
@@ -211,11 +216,33 @@ function renderVoting() {
   el('neinBtn').addEventListener('click', () => castVote('nein'));
 }
 
+function tileArray(v) {
+  return Array.isArray(v) ? v : Object.values(v || {});
+}
+
 async function renderPresidentDraw() {
   const roundId = currentMeta.roundId;
   const snap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDraw`));
-  const tiles = snap.val();
-  if (!tiles) { el('main').innerHTML = `<p class="muted">Loading policies...</p>`; return; }
+  const tiles = tileArray(snap.val());
+  if (!tiles.length) { el('main').innerHTML = `<p class="muted">Loading policies...</p>`; return; }
+  if (tiles.length <= 1) {
+    // Short-draw guard: nothing to choose — pass everything through.
+    el('main').innerHTML = `
+      <h2>Pass the policy on</h2>
+      <p class="muted">Only one tile remained in the supply.</p>
+      <div class="policy-choice">
+        ${tiles.map((t, i) => `<img class="policy-tile policy-tile-img" src="img/tile-${t}.png" alt="${t} policy" data-idx="${i}" />`).join('')}
+      </div>
+      <button id="passBtn">Pass to Chancellor</button>
+    `;
+    document.getElementById('passBtn').addEventListener('click', async () => {
+      await update(ref(db, `games/${room}`), {
+        [`secret/legislative/${roundId}/chancellorHand`]: tiles,
+      });
+      el('main').innerHTML = `<p class="muted">Sent to the Chancellor. Waiting...</p>`;
+    });
+    return;
+  }
   el('main').innerHTML = `
     <h2>Discard one policy</h2>
     <p class="muted">The remaining two go to the Chancellor.</p>
@@ -239,30 +266,97 @@ async function renderPresidentDraw() {
   });
 }
 
-async function renderChancellorHand() {
+function tileImg(t, i) {
+  const idx = i === undefined ? '' : ` data-idx="${i}"`;
+  return `<img class="policy-tile policy-tile-img" src="img/tile-${escapeHtml(t)}.png" alt="${escapeHtml(t)} policy"${idx} />`;
+}
+
+function renderChancellorHand() {
   const roundId = currentMeta.roundId;
-  const snap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
-  const tiles = snap.val();
-  if (!tiles) { el('main').innerHTML = `<p class="muted">Loading policies...</p>`; return; }
-  el('main').innerHTML = `
-    <h2>Enact one policy</h2>
-    <p class="muted">The other is discarded, unseen.</p>
-    <div class="policy-choice">
-      ${tiles.map((t, i) => `<img class="policy-tile policy-tile-img" src="img/tile-${t}.png" alt="${t} policy" data-idx="${i}" />`).join('')}
-    </div>
-  `;
-  document.querySelectorAll('.policy-tile').forEach(elm => {
-    elm.addEventListener('click', async () => {
-      const idx = Number(elm.dataset.idx);
-      const enacted = tiles[idx];
-      const discarded = tiles[1 - idx];
-      const discardSnap = await get(ref(db, `games/${room}/secret/discard`));
-      const discard = (discardSnap.val() || []).concat([discarded]);
-      await update(ref(db, `games/${room}`), {
-        [`secret/legislative/${roundId}/enactedTile`]: enacted,
-        'secret/discard': discard,
+  const base = `games/${room}/secret/legislative/${roundId}`;
+  // Re-render on veto state changes (request → waiting; refused → enact again).
+  onValue(ref(db, `${base}/vetoRequested`), async reqSnap => {
+    const requested = reqSnap.val() === true;
+    const handSnap = await get(ref(db, `${base}/chancellorHand`));
+    const tiles = tileArray(handSnap.val());
+    if (!tiles.length) { el('main').innerHTML = `<p class="muted">Loading policies...</p>`; return; }
+    if (requested) {
+      const decSnap = await get(ref(db, `${base}/vetoDecision`));
+      const decision = decSnap.val();
+      if (!decision) {
+        el('main').innerHTML = `<p class="muted">Veto requested. Waiting for the President to agree or refuse...</p>`;
+        return;
+      }
+      if (decision === 'agreed') {
+        el('main').innerHTML = `<p class="muted">Veto agreed — both policies discarded.</p>`;
+        return;
+      }
+      // Refused: fall through to the enact UI below.
+    }
+    const canVeto = currentMeta.vetoUnlocked === true && !requested;
+    el('main').innerHTML = `
+      <h2>${tiles.length > 1 ? 'Enact one policy' : 'Enact the policy'}</h2>
+      <p class="muted">${tiles.length > 1 ? 'The other is discarded, unseen.' : 'Only one tile remained in the supply.'}</p>
+      <div class="policy-choice">
+        ${tiles.map((t, i) => tileImg(t, i)).join('')}
+      </div>
+      ${canVeto ? `<button id="vetoBtn">I wish to veto this agenda</button>` : ''}
+    `;
+    document.querySelectorAll('.policy-tile').forEach(elm => {
+      elm.addEventListener('click', async () => {
+        const idx = Number(elm.dataset.idx);
+        const enacted = tiles[idx];
+        const rest = tiles.filter((_, i) => i !== idx);
+        const discardSnap = await get(ref(db, `games/${room}/secret/discard`));
+        const discard = (discardSnap.val() || []).concat(rest);
+        await update(ref(db, `games/${room}`), {
+          [`secret/legislative/${roundId}/enactedTile`]: enacted,
+          'secret/discard': discard,
+        });
+        el('main').innerHTML = `<p class="muted">Policy enacted. Waiting...</p>`;
       });
-      el('main').innerHTML = `<p class="muted">Policy enacted. Waiting...</p>`;
+    });
+    const vetoBtn = document.getElementById('vetoBtn');
+    if (vetoBtn) {
+      vetoBtn.addEventListener('click', async () => {
+        await set(ref(db, `${base}/vetoRequested`), true);
+        el('main').innerHTML = `<p class="muted">Veto requested. Waiting for the President...</p>`;
+      });
+    }
+  });
+}
+
+function renderVetoConsent() {
+  const roundId = currentMeta.roundId;
+  const base = `games/${room}/secret/legislative/${roundId}`;
+  onValue(ref(db, `${base}/vetoRequested`), async reqSnap => {
+    if (reqSnap.val() !== true) {
+      el('main').innerHTML = `<p>${escapeHtml(nameOf(currentMeta.chancellorUid))} is choosing a policy.</p>`;
+      return;
+    }
+    const decSnap = await get(ref(db, `${base}/vetoDecision`));
+    if (decSnap.val()) {
+      el('main').innerHTML = `<p class="muted">Decision recorded. Resuming...</p>`;
+      return;
+    }
+    const handSnap = await get(ref(db, `${base}/chancellorHand`));
+    const tiles = tileArray(handSnap.val());
+    el('main').innerHTML = `
+      <h2>Chancellor wishes to veto</h2>
+      <p class="muted">Agree to discard both policies (tracker +1), or refuse and they must enact one.</p>
+      <div class="policy-choice">${tiles.map(t => tileImg(t)).join('')}</div>
+      <div class="vote-buttons">
+        <button id="vetoAgreeBtn">I agree to the veto</button>
+        <button id="vetoRefuseBtn">Refuse — enact a policy</button>
+      </div>
+    `;
+    document.getElementById('vetoAgreeBtn').addEventListener('click', async () => {
+      await set(ref(db, `${base}/vetoDecision`), 'agreed');
+      el('main').innerHTML = `<p class="muted">Veto agreed. Resuming...</p>`;
+    });
+    document.getElementById('vetoRefuseBtn').addEventListener('click', async () => {
+      await set(ref(db, `${base}/vetoDecision`), 'refused');
+      el('main').innerHTML = `<p class="muted">Veto refused. Chancellor must enact.</p>`;
     });
   });
 }

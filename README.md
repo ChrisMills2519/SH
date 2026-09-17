@@ -56,16 +56,18 @@ Fascist policies), and all four presidential powers except Veto:
 - **Special Election** — President picks any living player; presidency returns to the
   correct next-in-line afterwards.
 - **Policy Peek** — President sees the top 3 tiles, taps Done to resume.
+- **Veto Power** (unlocks after the 5th Fascist policy) — Chancellor may propose a veto,
+  President consents (seeing both tiles) or refuses; agreed vetoes discard both policies and
+  advance the tracker (+1, chaos at 3).
 
 Official art is wired in (`public/img/`): policy tiles, role cards, ballots, logo —
 re-rendered at 2x from Ying Tong Li's CC BY-NC-SA vector rebuild plus Kenney CC0
 power icons. Full credits in `public/ATTRIBUTION.md`; originals backed up in
 `public/img/original-2026-09-17/`.
 
-**Not implemented:** **Veto Power** (unlocks after the 5th Fascist policy — deliberately
-deferred until after the first playtest), reconnect-with-same-identity if a phone's browser
-data is cleared (a refresh is fine, but a *new browser* means a new anonymous UID and no way
-back into your seat), and there's no spectator mode beyond the executed-player banner.
+**Not implemented:** reconnect-with-same-identity if a phone's browser data is cleared (a
+refresh is fine, but a *new browser* means a new anonymous UID and no way back into your
+seat), and there's no spectator mode beyond the executed-player banner.
 
 <!-- DEV-ONLY START: delete this section with dev-bots.js before game night. -->
 ## Dev testing (solo playtest shortcuts — remove before game night)

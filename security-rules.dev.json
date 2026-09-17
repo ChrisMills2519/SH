@@ -148,7 +148,7 @@
                 ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
               },
               "chancellorHand": {
-                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
                 // DEV ONLY: host may discard for bot presidents.
                 ".write": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
               },
@@ -156,6 +156,16 @@
                 ".read": "auth != null",
                 // DEV ONLY: host may enact for bot chancellors.
                 ".write": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()) && (newData.val() === 'liberal' || newData.val() === 'fascist')"
+              },
+              "vetoRequested": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                // DEV ONLY: host may request for bot chancellors.
+                ".write": "auth != null && ((auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() && !data.exists() && newData.val() === true) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
+              },
+              "vetoDecision": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                // DEV ONLY: host may decide for bot presidents.
+                ".write": "auth != null && ((auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() && !data.exists() && (newData.val() === 'agreed' || newData.val() === 'refused')) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
               }
             }
           },
