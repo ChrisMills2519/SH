@@ -228,6 +228,31 @@ img.policy-tile.policy-tile-img {
   vertical-align: middle;
 }
 
+/* Sourced artwork: official board reference + CC0 power icons */
+.board-art-details { margin-top: 12px; }
+.board-art-details summary { cursor: pointer; }
+.board-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid #444;
+}
+
+.power-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.power-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  filter: invert(90%);
+}
+
 /* Small displays: stack the board tracks instead of squeezing them. */
 @media (max-width: 700px) {
   .tracks { flex-direction: column; }

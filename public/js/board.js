@@ -467,7 +467,20 @@ function render() {
   el('fascistSlots').innerHTML = renderTrack(currentMeta.fascistTrack || 0, 6, 'fascist');
   el('electionTrackerLabel').textContent = `${currentMeta.electionTracker || 0} / 3`;
 
+  // Show the official Fascist board matching the player-count bracket
+  // (same brackets as the executive-power table in game-logic.js).
   const order = currentMeta.playerOrder || [];
+  const playerCount = order.length || Object.keys(currentPlayers).length;
+  const fascistArt = el('fascistBoardArt');
+  const fascistLabel = el('fascistBoardLabel');
+  if (fascistArt) {
+    const variant = playerCount >= 9 ? '910' : playerCount >= 7 ? '78' : '56';
+    const expected = `img/board-fascist-${variant}.png`;
+    if (fascistArt.getAttribute('src') !== expected) fascistArt.setAttribute('src', expected);
+  }
+  if (fascistLabel) {
+    fascistLabel.textContent = playerCount >= 9 ? '9–10 players' : playerCount >= 7 ? '7–8 players' : '5–6 players';
+  }
   el('playerChips').innerHTML = order.map(uid => {
     const p = currentPlayers[uid] || {};
     const classes = ['player-chip'];

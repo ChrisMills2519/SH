@@ -57,7 +57,10 @@ Fascist policies), and all four presidential powers except Veto:
   correct next-in-line afterwards.
 - **Policy Peek** — President sees the top 3 tiles, taps Done to resume.
 
-Official art is wired in (`public/img/`): policy tiles, role cards, ballots, logo.
+Official art is wired in (`public/img/`): policy tiles, role cards, ballots, logo —
+re-rendered at 2x from Ying Tong Li's CC BY-NC-SA vector rebuild plus Kenney CC0
+power icons. Full credits in `public/ATTRIBUTION.md`; originals backed up in
+`public/img/original-2026-09-17/`.
 
 **Not implemented:** **Veto Power** (unlocks after the 5th Fascist policy — deliberately
 deferred until after the first playtest), reconnect-with-same-identity if a phone's browser

@@ -271,7 +271,7 @@ function renderExecution() {
   const order = currentMeta.playerOrder || [];
   const options = order.filter(uid => uid !== myUid && currentPlayers[uid] && currentPlayers[uid].alive !== false);
   el('main').innerHTML = `
-    <h2>Choose a player to execute</h2>
+    <h2 class="power-title"><img class="power-icon" src="img/icon-execution.png" alt="" />Choose a player to execute</h2>
     ${options.map(uid => `<button data-uid="${uid}" class="executeBtn">${escapeHtml(nameOf(uid))}</button>`).join('')}
   `;
   document.querySelectorAll('.executeBtn').forEach(btn => {
@@ -289,7 +289,7 @@ function renderInvestigate() {
   const investigated = currentMeta.investigatedUids || {};
   const options = order.filter(uid => uid !== myUid && !investigated[uid] && currentPlayers[uid] && currentPlayers[uid].alive !== false);
   el('main').innerHTML = `
-    <h2>Investigate Loyalty</h2>
+    <h2 class="power-title"><img class="power-icon" src="img/icon-investigate.png" alt="" />Investigate Loyalty</h2>
     <p class="muted">Pick a player to learn whether they are Liberal or Fascist.</p>
     <div id="investigateOptions">${options.map(uid => `<button data-uid="${uid}" class="investigateBtn">${escapeHtml(nameOf(uid))}</button>`).join('')}</div>
     <div id="investigateResult"></div>
@@ -315,7 +315,7 @@ function renderSpecialElection() {
   const order = currentMeta.playerOrder || [];
   const options = order.filter(uid => uid !== myUid && currentPlayers[uid] && currentPlayers[uid].alive !== false);
   el('main').innerHTML = `
-    <h2>Special Election</h2>
+    <h2 class="power-title"><img class="power-icon" src="img/icon-special-election.png" alt="" />Special Election</h2>
     <p class="muted">Choose any other living player to be President next.</p>
     ${options.map(uid => `<button data-uid="${uid}" class="specialBtn">${escapeHtml(nameOf(uid))}</button>`).join('')}
   `;
@@ -329,13 +329,13 @@ function renderSpecialElection() {
 
 function renderPolicyPeek() {
   const roundId = currentMeta.roundId;
-  el('main').innerHTML = `<h2>Policy Peek</h2><p class="muted">Loading top 3 policies...</p>`;
+  el('main').innerHTML = `<h2 class="power-title"><img class="power-icon" src="img/icon-peek.png" alt="" />Policy Peek</h2><p class="muted">Loading top 3 policies...</p>`;
   // Board writes the peek after entering executive_action, so listen live.
   onValue(ref(db, `games/${room}/secret/executive/${roundId}/policyPeek`), async snap => {
     const tiles = snap.val();
     if (!tiles) return;
     el('main').innerHTML = `
-      <h2>Policy Peek</h2>
+      <h2 class="power-title"><img class="power-icon" src="img/icon-peek.png" alt="" />Policy Peek</h2>
       <p class="muted">Top 3 deck tiles (only you see this). Tap Done to resume the game.</p>
       <div class="policy-choice">
         ${(Array.isArray(tiles) ? tiles : Object.values(tiles)).map(t => `<img class="policy-tile-img" src="img/tile-${escapeHtml(t)}.png" alt="${escapeHtml(t)} policy" />`).join('')}
