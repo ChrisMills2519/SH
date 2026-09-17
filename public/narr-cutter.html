@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Narrator Cut Marker (dev only — delete before game night)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
+  .big { font-size: 2rem; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
+  button { padding: .5rem .8rem; font-size: 1rem; cursor: pointer; }
+  #addCut { background: #c00; color: #fff; font-weight: bold; }
+  #nowLine { background: #fff8dc; border: 2px solid #c90; padding: .6rem .8rem; font-size: 1.1rem; margin: .5rem 0; }
+  .cols { display: flex; gap: 1.5rem; align-items: flex-start; }
+  .cols > section { flex: 1; min-width: 0; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  td, th { border: 1px solid #ccc; padding: .3rem .5rem; font-variant-numeric: tabular-nums; }
+  input[type=number] { width: 7em; }
+  input[type=text] { width: 100%; }
+  textarea { width: 100%; height: 140px; font-family: monospace; }
+  .muted { color: #666; }
+  kbd { background: #eee; border: 1px solid #ccc; padding: 0 .35em; border-radius: 3px; }
+  ol.script { columns: 2; }
+  ol.script li { break-inside: avoid; margin-bottom: .3rem; font-size: .9rem; cursor: pointer; padding: .15rem .3rem; }
+  ol.script li.done { color: #666; }
+  ol.script li.current { background: #fff8dc; border: 1px solid #c90; font-weight: bold; }
+  ol.script li .clip { font-variant-numeric: tabular-nums; color: #666; font-weight: normal; }
+  @media (max-width: 800px) { .cols { flex-direction: column; } }
+  #scrub { width: 100%; height: 2rem; }
+  #marks { position: relative; height: 1.1rem; background: #eee; cursor: pointer; margin: .2rem 0 .5rem; }
+  #marks .mk { position: absolute; top: 0; bottom: 0; width: 3px; background: #c00; }
+  #marks .playhead { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #06c; }
+  #fileSplit { position: absolute; top: 0; bottom: 0; width: 2px; background: #666; }
+
+</style>
+</head>
+<body>
+<h1>Narrator cut marker <span class="muted">(dev only)</span></h1>
+<p class="muted">Plays <code>snd/fullscript.mp3</code> then <code>snd/fullscript2.mp3</code> as one timeline.
+Pause exactly in a silence, hit <b>Add cut</b>. When you have <b>50 cuts → 51 clips</b>, export and paste it back to me.</p>
+
+<audio id="player" preload="auto"></audio>
+
+<div class="row">
+  <button id="file1Btn">1: fullscript.mp3</button>
+  <button id="file2Btn">2: fullscript2.mp3</button>
+  <span id="fileLabel" class="muted"></span>
+</div>
+
+<p class="big">Global <span id="clock">0.00</span>s <span class="muted" id="local"></span></p>
+
+<div>
+  <input id="scrub" type="range" min="0" max="202" step="0.01" value="0" aria-label="Scrub global timeline" />
+  <div id="marks" title="Click to seek. Red ticks = cuts."><div id="fileSplit"></div><div class="playhead" id="playhead"></div></div>
+</div>
+
+<div id="nowLine">Clip <b id="nowNum">1 / 51</b>: <span id="nowText"></span></div>
+
+<div class="row">
+  <button id="playBtn">Play / Pause <kbd>Space</kbd></button>
+  <button id="back1">−1s <kbd>←</kbd></button>
+  <button id="fwd1">+1s <kbd>→</kbd></button>
+  <button id="backFine">−0.2s <kbd>,</kbd></button>
+  <button id="fwdFine">+0.2s <kbd>.</kbd></button>
+  <button id="slowBtn">Speed: 1x</button>
+  <button id="addCut">＋ Add cut here <kbd>C</kbd></button>
+</div>
+
+<div class="row">
+  <label>Seek to global s: <input id="seekBox" type="number" step="0.01" min="0" /></label>
+  <button id="seekBtn">Go</button>
+  <span id="countLabel"></span>
+</div>
+
+<div class="cols">
+<section>
+<h2>Cuts (<span id="cutCount">0</span> / 50 needed)</h2>
+<div class="row">
+  <button id="clearBtn">Clear all cuts</button>
+</div>
+<table>
+  <thead><tr><th>#</th><th>Global s</th><th>Closes clip</th><th>Listen</th><th>Del</th></tr></thead>
+  <tbody id="cutBody"></tbody>
+</table>
+
+<h2>Export for the cutter (me)</h2>
+<div class="row">
+  <button id="exportBtn">Export cuts</button>
+  <button id="copyBtn">Copy</button>
+  <button id="downloadBtn">Download cuts.json</button>
+  <button id="importBtn">Import pasted JSON</button>
+</div>
+<textarea id="out" placeholder="Export output / paste to import"></textarea>
+</section>
+
+<section>
+<h2>Script — one clip each (<span id="doneCount">0</span> / 51 done)</h2>
+<p class="muted">Click a line to hear its clip start. The highlighted line is what you're isolating now — placing a cut closes it and moves to the next.</p>
+<ol class="script" id="scriptList"></ol>
+</section>
+</div>
+
+<script>
+const FILES = ["snd/fullscript.mp3", "snd/fullscript2.mp3"];
+// Fallback durations (probed 35.422041 / 166.661188); replaced by real metadata when loaded.
+let durs = [35.422041, 166.661188];
+let active = 0;
+const player = document.getElementById('player');
+const clock = document.getElementById('clock');
+const localEl = document.getElementById('local');
+const fileLabel = document.getElementById('fileLabel');
+
+// Preloaded first-guess cuts (global seconds, from silence detect). Adjust or delete freely.
+let cuts = [3.98,11.15,19.78,21.55,22.66,25.84,36.86,42.32,47.66,49.21,62.20,64.09,65.73,66.77,70.99,74.38,77.96,82.26,84.91,88.14,90.06,91.94,101.55,110.55,113.33,117.91,123.24,128.43,130.17,133.17,134.47,137.49,142.84,144.93,146.63,149.20,151.93,154.59,158.40,161.22,163.62,171.79,175.52,177.86,179.20,180.71,183.00,184.84,189.39,195.85];
+
+const SCRIPT = ["Welcome to Secret Hitler.","Liberals outnumber Fascists, but the Fascists know each other.","Find Hitler. Stop the Fascist agenda. Trust no one.","Check your phone to see your secret role. Shield your screen.","Tap your role card to reveal it. Keep it hidden.","The game begins. Good luck.","Mister President, nominate your Chancellor.","The President picks a Chancellor, then everyone votes. The last elected leaders cannot be picked again.","Term limits apply. The last President and Chancellor are ineligible.","Waiting for the nomination.","The vote is open. Vote Ya, or Nine, on your phone now.","Government elected. Presidency proceeds to legislation.","Vote failed. The election tracker advances by one.","Tracker at one of three.","Tracker at two of three. One more failure means chaos.","Waiting for all votes.","Three failed votes. Chaos.","The country is in turmoil. The top policy enacts itself.","Term limits forgotten. Tracker reset.","Mister President, discard one policy in secret. Pass two to your Chancellor.","Never state exact tiles. You may lie, or tell the truth.","Mister Chancellor, enact one policy in secret. Discard the other unseen.","Waiting for legislation.","Liberal policy enacted.","One Liberal. Four to go.","Two Liberals. Liberals are gaining ground.","Three Liberals. The Fascists are nervous.","Four Liberals. One more for a Liberal victory.","Fascist policy enacted.","Fascists advance. The presidency gains new power.","Policy Peek. The President views the top three tiles in secret.","Investigate Loyalty. The President learns one player's true allegiance.","That result is private. Share it, or lie about it. Your choice.","Special Election. The President chooses the next President.","Execution. The President must execute one player.","Waiting for the Presidential power.","The peek is complete. Presidency passes.","The investigation is complete. Presidency passes.","A special election has been called. Normal rotation will resume after.","A player has been executed. They were not Hitler.","A player has been executed. The game continues without them.","Veto power is now unlocked.","After five Fascists, the Chancellor may propose discarding both tiles. The President must agree.","Veto proposed. Mister President, agree or refuse.","Veto agreed. Both policies discarded. Tracker advances.","Veto refused. Chancellor, you must enact.","Five Liberal policies. Liberals win.","Six Fascist policies. Fascists win.","Hitler has been elected Chancellor. Fascists win.","Hitler has been executed. Liberals win.","Game over. Thank you for playing. Start a new game to play again."];
+document.getElementById('scriptList').innerHTML = SCRIPT.map(s => `<li>${s}</li>`).join('');
+
+function offset(i){ return i === 0 ? 0 : durs[0]; }
+function globalNow(){ return offset(active) + (player.currentTime || 0); }
+
+function load(i, t = 0){
+  active = i;
+  player.src = FILES[i];
+  player.currentTime = 0;
+  player.addEventListener('loadedmetadata', function h(){
+    player.removeEventListener('loadedmetadata', h);
+    if (Number.isFinite(player.duration)) durs[i] = player.duration;
+    player.currentTime = Math.min(Math.max(0, t), (durs[i] || 1e9) - 0.05);
+    tick();
+  });
+  player.play().catch(()=>{});
+  tick();
+}
+function total(){ return (durs[0] || 0) + (durs[1] || 0); }
+let scrubbing = false;
+const scrub = document.getElementById('scrub');
+const marks = document.getElementById('marks');
+const playhead = document.getElementById('playhead');
+function drawMarks(){
+  const t = total() || 1;
+  scrub.max = t.toFixed(2);
+  document.getElementById('fileSplit').style.left = `${(durs[0]/t*100).toFixed(2)}%`;
+  marks.querySelectorAll('.mk').forEach(e => e.remove());
+  cuts.forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'mk'; d.style.left = `${(c/t*100).toFixed(3)}%`; d.title = `${c.toFixed(2)}s`;
+    marks.appendChild(d);
+  });
+}
+scrub.addEventListener('pointerdown', () => scrubbing = true);
+window.addEventListener('pointerup', () => scrubbing = false);
+scrub.addEventListener('input', () => seekGlobal(parseFloat(scrub.value)));
+marks.addEventListener('click', e => {
+  const r = marks.getBoundingClientRect();
+  seekGlobal(total() * Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
+});
+function tick(){
+  const g = globalNow();
+  clock.textContent = g.toFixed(2);
+  localEl.textContent = `(file ${active+1} @ ${(player.currentTime||0).toFixed(2)}s)`;
+  fileLabel.textContent = `file ${active+1}/2: ${FILES[active]} (len ${durs[active].toFixed(1)}s)`;
+  const t = total() || 1;
+  if (!scrubbing && document.activeElement !== scrub) scrub.value = g.toFixed(2);
+  playhead.style.left = `${(g/t*100).toFixed(3)}%`;
+}
+player.addEventListener('timeupdate', tick);
+player.addEventListener('ended', () => { if (active === 0) load(1, 0); });
+
+function seekGlobal(g){
+  g = Math.max(0, g);
+  if (g < durs[0]) { if (active !== 0 || !player.src) load(0, g); else player.currentTime = g; }
+  else { const t = g - durs[0]; if (active !== 1 || !player.src) load(1, t); else player.currentTime = Math.min(t, durs[1]-0.05); }
+  tick();
+}
+function seekRel(d){ seekGlobal(globalNow() + d); }
+
+function clipStart(i){ // clip index 0-based -> global start second
+  if (i <= 0) return 0;
+  return cuts[i-1];
+}
+
+function renderScript(){
+  const n = cuts.length; // clips closed so far; clip n (0-based) is being isolated
+  const ol = document.getElementById('scriptList');
+  ol.innerHTML = '';
+  SCRIPT.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.className = i < n ? 'done' : (i === n ? 'current' : '');
+    li.innerHTML = `<span class="clip">narr_${String(i+1).padStart(2,'0')}</span> ${i < n ? '✓ ' : ''}${s}`;
+    li.title = 'Click to hear this clip start';
+    li.addEventListener('click', () => { seekGlobal(Math.max(0, clipStart(i) - 0.3)); });
+    ol.appendChild(li);
+  });
+  document.getElementById('doneCount').textContent = Math.min(n, SCRIPT.length);
+  const cur = Math.min(n, SCRIPT.length - 1);
+  document.getElementById('nowNum').textContent = `${Math.min(n+1, SCRIPT.length)} / ${SCRIPT.length}`;
+  document.getElementById('nowText').textContent = n >= SCRIPT.length ? 'All clips closed — export!' : SCRIPT[cur];
+  const curEl = ol.children[cur];
+  if (curEl) curEl.scrollIntoView({ block: 'nearest' });
+}
+
+function render(){
+  cuts.sort((a,b) => a-b);
+  const tb = document.getElementById('cutBody');
+  tb.innerHTML = '';
+  cuts.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td>
+      <td><input type="number" step="0.01" min="0" value="${c.toFixed(2)}" data-i="${i}" class="edit" /></td>
+      <td class="muted">✓ narr_${String(i+1).padStart(2,'0')}: ${SCRIPT[i] ? SCRIPT[i].slice(0,40) + '…' : ''}</td>
+      <td><button data-seek="${(c-0.6).toFixed(2)}">▶ pre</button></td>
+      <td><button data-del="${i}">✕</button></td>`;
+    tb.appendChild(tr);
+  });
+  document.getElementById('cutCount').textContent = cuts.length;
+  document.getElementById('countLabel').textContent = `${cuts.length} cuts → ${cuts.length+1} clips (want 50 → 51)`;
+  tb.querySelectorAll('.edit').forEach(inp => inp.addEventListener('change', e => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v) && v >= 0) { cuts[+e.target.dataset.i] = v; render(); }
+  }));
+  tb.querySelectorAll('[data-seek]').forEach(b => b.addEventListener('click', () => seekGlobal(parseFloat(b.dataset.seek))));
+  tb.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => { cuts.splice(+b.dataset.del, 1); render(); }));
+  renderScript();
+  drawMarks();
+}
+
+document.getElementById('playBtn').addEventListener('click', () => { if (!player.src) load(0, 0); else if (player.paused) player.play().catch(()=>{}); else player.pause(); });
+document.getElementById('file1Btn').addEventListener('click', () => load(0, 0));
+document.getElementById('file2Btn').addEventListener('click', () => load(1, 0));
+document.getElementById('back1').addEventListener('click', () => seekRel(-1));
+document.getElementById('fwd1').addEventListener('click', () => seekRel(1));
+document.getElementById('backFine').addEventListener('click', () => seekRel(-0.2));
+document.getElementById('fwdFine').addEventListener('click', () => seekRel(0.2));
+document.getElementById('slowBtn').addEventListener('click', e => {
+  player.playbackRate = player.playbackRate === 1 ? 0.6 : 1;
+  e.target.textContent = `Speed: ${player.playbackRate}x`;
+});
+document.getElementById('addCut').addEventListener('click', () => { cuts.push(+globalNow().toFixed(2)); render(); });
+document.getElementById('clearBtn').addEventListener('click', () => { if (confirm('Delete all cuts and start fresh?')) { cuts = []; render(); } });
+document.getElementById('seekBtn').addEventListener('click', () => seekGlobal(parseFloat(document.getElementById('seekBox').value)));
+document.addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if (e.code === 'Space') { e.preventDefault(); document.getElementById('playBtn').click(); }
+  else if (e.key === 'ArrowLeft') seekRel(-1);
+  else if (e.key === 'ArrowRight') seekRel(1);
+  else if (e.key === ',') seekRel(-0.2);
+  else if (e.key === '.') seekRel(0.2);
+  else if (e.key === 'c' || e.key === 'C') document.getElementById('addCut').click();
+});
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const payload = { order: FILES, file1Duration: +durs[0].toFixed(3), cuts: [...cuts].sort((a,b)=>a-b).map(c => +c.toFixed(2)) };
+  document.getElementById('out').value = JSON.stringify(payload, null, 1);
+});
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  document.getElementById('exportBtn').click();
+  try { await navigator.clipboard.writeText(document.getElementById('out').value); } catch(_) { document.getElementById('out').select(); }
+});
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  document.getElementById('exportBtn').click();
+  const blob = new Blob([document.getElementById('out').value], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'cuts.json'; a.click();
+});
+document.getElementById('importBtn').addEventListener('click', () => {
+  try {
+    const p = JSON.parse(document.getElementById('out').value);
+    if (Array.isArray(p.cuts)) { cuts = p.cuts; render(); }
+  } catch(_) { alert('Not valid JSON'); }
+});
+
+render();
+load(0, 0);
+</script>
+</body>
+</html>

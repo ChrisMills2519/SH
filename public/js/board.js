@@ -7,6 +7,7 @@ import {
   ineligibleChancellorCandidates, checkWin, checkExecutionWin,
 } from './game-logic.js';
 import { playSound, initSoundToggle } from './sound.js';
+import { initNarratorToggle, narrate, narrateOnce, narrateDelayed, cancelNarratorPending, resetNarratorKeys } from './narrator.js';
 
 const params = new URLSearchParams(location.search);
 const room = params.get('room');
@@ -19,11 +20,20 @@ const el = id => document.getElementById(id);
 let myUid = null;
 let currentMeta = {};
 let currentPlayers = {};
+// Tabletop extras (read-only mirrors for piles + vote dots; never written).
+let deckCount = 17;
+let discardCount = 0;
+let votesCastMap = {};
+let votesMap = {};
+let votesRevealedFlag = false;
+let extrasRound = null;
+let extrasUnsubs = [];
 
 async function main() {
   const user = await ensureSignedIn();
   myUid = user.uid;
   initSoundToggle();
+  initNarratorToggle();
 
   if (isNew) {
     // Claim hostUid first (its rule allows creating an empty room), then
@@ -56,9 +66,25 @@ async function main() {
     render();
     // Only the host reacts to phase-driving events, and only once per change.
     if (currentMeta.hostUid === myUid && currentMeta.phase !== prevPhase) {
+      cancelNarratorPending();
       handlePhaseEnter(currentMeta.phase);
     }
   });
+
+  // Tabletop mirrors: draw/discard pile sizes (host-readable) + per-round
+  // vote presence/values for seat dots. Read-only; game logic untouched.
+  onValue(ref(db, `games/${room}/secret/deck`), snap => {
+    const v = snap.val();
+    const arr = Array.isArray(v) ? v : Object.values(v || {});
+    deckCount = arr.length;
+    render();
+  }, () => {});
+  onValue(ref(db, `games/${room}/secret/discard`), snap => {
+    const v = snap.val();
+    const arr = Array.isArray(v) ? v : Object.values(v || {});
+    discardCount = arr.length;
+    render();
+  }, () => {});
 
   el('startBtn').addEventListener('click', startGame);
   el('forceResolveBtn').addEventListener('click', () => {
@@ -128,6 +154,13 @@ async function startGame() {
   updates['meta/investigatedUids'] = null;
   await update(ref(db, `games/${room}`), updates);
   playSound('game-start');
+  resetNarratorKeys();
+  narrate('narr_01');
+  narrate('narr_02');
+  narrate('narr_03');
+  narrate('narr_04');
+  narrate('narr_05');
+  narrate('narr_06');
 }
 
 // ---------------------------------------------------------------------------
@@ -136,11 +169,75 @@ async function startGame() {
 // where "what happens next" is decided — same job a Node server would do.
 // ---------------------------------------------------------------------------
 function handlePhaseEnter(phase) {
-  if (phase === 'nomination') watchForNomination();
-  if (phase === 'election') watchForVotes();
-  if (phase === 'legislative_president') { watchForPresidentChoice(); watchForPresidentDiscard(); }
-  if (phase === 'legislative_chancellor') { watchForChancellorEnact(); watchForVeto(); }
-  if (phase === 'executive_action') watchForExecutiveAction();
+  const roundId = currentMeta.roundId || 0;
+  const tutorial = roundId <= 1; // first two rounds over-explain, then terse calls
+  const stillIn = (p, r) => {
+    const m = currentMeta;
+    return m.phase === p && (m.roundId || 0) === r;
+  };
+  if (phase === 'nomination') {
+    watchForNomination();
+    narrateOnce(`nom-${roundId}`, 'narr_07');
+    narrate(tutorial ? 'narr_08' : 'narr_09');
+    narrateDelayed(`nom-wait-${roundId}`, 'narr_10', 20000, () => stillIn('nomination', roundId) && !currentMeta.chancellorCandidateUid);
+  }
+  if (phase === 'election') {
+    watchForVotes();
+    narrateOnce(`vote-${roundId}`, 'narr_11');
+    narrateDelayed(`vote-wait-${roundId}`, 'narr_16', 20000, () => stillIn('election', roundId));
+  }
+  if (phase === 'legislative_president') {
+    watchForPresidentChoice(); watchForPresidentDiscard();
+    narrateOnce(`pres-${roundId}`, 'narr_20');
+    if (tutorial) narrate('narr_21');
+    narrateDelayed(`pres-wait-${roundId}`, 'narr_23', 25000, () => stillIn('legislative_president', roundId));
+  }
+  if (phase === 'legislative_chancellor') { watchForChancellorEnact(); watchForVeto(); watchForVetoRequest(roundId); narrateOnce(`chan-${roundId}`, 'narr_22'); }
+  if (phase === 'executive_action') {
+    watchForExecutiveAction();
+    narrateExecutiveIntro(roundId);
+    narrateDelayed(`pow-wait-${roundId}`, 'narr_36', 25000, () => stillIn('executive_action', roundId));
+  }
+}
+
+// One-shot intro line for whichever presidential power just unlocked.
+function narrateExecutiveIntro(roundId) {
+  const power = currentMeta.pendingPower;
+  if (power === 'policy_peek') narrateOnce(`pow-${roundId}`, 'narr_31');
+  else if (power === 'investigate_loyalty') narrateOnce(`pow-${roundId}`, 'narr_32');
+  else if (power === 'special_election') narrateOnce(`pow-${roundId}`, 'narr_34');
+  else if (power === 'execution') narrateOnce(`pow-${roundId}`, 'narr_35');
+}
+
+// Shared enactment narration: generic call + running count. Wins are handled
+// by endGame, so counts only cover non-winning totals.
+function narrateEnactment(tile, newVal) {
+  if (tile === 'liberal') {
+    narrate('narr_24');
+    if (newVal === 1) narrate('narr_25');
+    else if (newVal === 2) narrate('narr_26');
+    else if (newVal === 3) narrate('narr_27');
+    else if (newVal === 4) narrate('narr_28');
+  } else {
+    narrate('narr_29');
+    narrate('narr_30');
+  }
+}
+
+// The Chancellor's veto request lives under secret/legislative, not meta, so it
+// needs its own watcher (host-only, installed alongside watchForVeto).
+function watchForVetoRequest(roundId) {
+  let done = false;
+  let unsub = null;
+  unsub = onValue(ref(db, `games/${room}/secret/legislative/${roundId}/vetoRequested`), async snap => {
+    if (done) return;
+    if (snap.val() !== true) return;
+    const m = await freshMeta();
+    if (m.phase !== 'legislative_chancellor' || (m.roundId || 0) !== roundId) return;
+    done = true;
+    if (typeof unsub === 'function') unsub();
+    narrateOnce(`veto-req-${roundId}`, 'narr_44');
+  });
 }
 
 function alivePlayers() {
@@ -275,6 +372,8 @@ async function resolveElection(majority, fresh) {
       if (win) return;
     } else {
       playSound('election-fail');
+      narrate('narr_13');
+      narrate(tracker === 1 ? 'narr_14' : 'narr_15');
       await update(metaRef, { electionTracker: tracker, chancellorCandidateUid: null });
     }
     advancePresidency(false).catch(e => console.warn('[board] advance failed:', e && e.message));
@@ -295,6 +394,7 @@ async function resolveElection(majority, fresh) {
 
   const draw = await takeTiles(3);
   playSound('election-pass');
+  narrate('narr_12');
   await update(ref(db, `games/${room}`), {
     'meta/chancellorUid': chancellorUid,
     'meta/electionTracker': 0,
@@ -320,6 +420,8 @@ function shuffleReshuffle(arr) {
 async function runChaos(fresh) {
   const base = fresh || currentMeta;
   playSound('chaos');
+  narrate('narr_17');
+  narrate('narr_18');
   const drawn = await takeTiles(1);
   const tile = drawn[0];
   const trackField = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
@@ -333,6 +435,8 @@ async function runChaos(fresh) {
     'meta/chancellorUidLast': null,
     'meta/vetoUnlocked': vetoUnlocked(fascistNow),
   });
+  narrateEnactment(tile, newVal);
+  narrate('narr_19');
   const win = checkWin({ liberalTrack: trackField === 'liberalTrack' ? newVal : base.liberalTrack, fascistTrack: fascistNow });
   if (win) {
     await endGame(win);
@@ -543,6 +647,7 @@ function watchForChancellorEnact() {
     const tile = hand[idx];
     await appendToDiscard(hand.filter((_, i) => i !== idx));
     playSound(tile === 'liberal' ? 'enact-liberal' : 'enact-fascist');
+    narrateEnactment(tile, (m[field] || 0) + 1);
     await update(ref(db, `games/${room}`), {
       [`secret/legislative/${roundId}/enactedTile`]: tile,
     });
@@ -551,6 +656,10 @@ function watchForChancellorEnact() {
     // Veto unlocks permanently once the 5th fascist policy is enacted.
     const unlock = field === 'fascistTrack' && vetoUnlocked(newVal);
     await update(metaRef, { [field]: newVal, ...(unlock ? { vetoUnlocked: true } : {}) });
+    if (unlock) {
+      narrate('narr_42');
+      if ((m.roundId || 0) <= 1) narrate('narr_43');
+    }
     // End-of-session reshuffle so the deck stays >= 3 (keeps Policy Peek honest).
     await reshuffleIfShort().catch(e => console.warn('[board] reshuffle failed:', e && e.message));
 
@@ -591,6 +700,7 @@ function watchForVeto() {
       // per the rules, a refused veto forces a normal enactment.
       // No claim taken here, so a replayed 'refused' is idempotent.
       playSound('vote-cast');
+      narrate('narr_46');
       await update(ref(db, `games/${room}`), {
         [`secret/legislative/${roundId}/vetoRequested`]: null,
         [`secret/legislative/${roundId}/vetoDecision`]: null,
@@ -610,6 +720,7 @@ function watchForVeto() {
     done = true;
     if (typeof unsub === 'function') unsub();
     playSound('election-fail'); // agreed veto: both tiles dead, tracker advances
+    narrate('narr_45');
     const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
     const hand = handSnap.val();
     const tiles = Array.isArray(hand) ? hand : Object.values(hand || {});
@@ -656,6 +767,8 @@ async function watchForExecutiveAction() {
       });
       const win = checkExecutionWin({ executedUid: target, roles });
       if (win) return endGame(win);
+      // Alternate the two execution outros so repeat games don't sound canned.
+      narrate((roundId || 0) % 2 === 0 ? 'narr_40' : 'narr_41');
       advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
     });
   } else if (power === 'investigate_loyalty') {
@@ -675,6 +788,8 @@ async function watchForExecutiveAction() {
       // Hitler counts as fascist for this power.
       const result = roles[target] === 'liberal' ? 'liberal' : 'fascist';
       playSound('reveal');
+      narrate('narr_33');
+      narrate('narr_38');
       await update(ref(db, `games/${room}`), {
         [`secret/executive/${currentMeta.roundId}/investigateResult`]: result,
         [`meta/investigatedUids/${target}`]: true,
@@ -697,6 +812,7 @@ async function watchForExecutiveAction() {
       if (typeof unsub === 'function') unsub();
       const enacting = currentMeta.presidentUid;
       playSound('reveal'); // special election called
+      narrate('narr_39');
       const updates = {
         'meta/presidentUid': target,
         'meta/presidentUidLast': enacting,
@@ -736,6 +852,7 @@ async function watchForExecutiveAction() {
       if (!(await claim(`power-${roundId}`))) return;
       peekDone = true;
       if (typeof unsub === 'function') unsub();
+      narrate('narr_37');
       await update(ref(db, `games/${room}`), { 'meta/pendingPower': null });
       advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
     });
@@ -744,6 +861,11 @@ async function watchForExecutiveAction() {
 
 async function endGame(win) {
   playSound(win.winner === 'liberal' ? 'win-liberal' : 'win-fascist');
+  if (win.reason === 'five_liberal_policies') narrate('narr_47');
+  else if (win.reason === 'six_fascist_policies') narrate('narr_48');
+  else if (win.reason === 'hitler_elected_chancellor') narrate('narr_49');
+  else if (win.reason === 'hitler_executed') narrate('narr_50');
+  narrate('narr_51');
   await update(metaRef, { winner: win.winner, winReason: win.reason, phase: 'gameover' });
 }
 
@@ -766,6 +888,9 @@ function render() {
   }
 
   paintBoardOverlays();
+  watchRoundExtras();
+  paintSeats();
+  paintPiles();
 
   // Show the official Fascist board matching the player-count bracket
   // (same brackets as the executive-power table in game-logic.js).
@@ -845,6 +970,107 @@ function paintTrackerPips(tracker) {
     ).join('');
   }
   [...layer.children].forEach((pip, i) => pip.classList.toggle('lit', i < tracker));
+}
+
+// Per-round vote mirrors for seat dots. Re-subscribes when roundId changes;
+// old listeners are torn down so dots never show a stale round's votes.
+function watchRoundExtras() {
+  const roundId = currentMeta.roundId;
+  if (roundId === extrasRound) return;
+  extrasRound = roundId;
+  extrasUnsubs.forEach(u => { try { u(); } catch (_) {} });
+  extrasUnsubs = [];
+  votesCastMap = {};
+  votesMap = {};
+  votesRevealedFlag = false;
+  if (roundId === null || roundId === undefined) return;
+  const push = (path, apply) => {
+    try {
+      const u = onValue(ref(db, `games/${room}/${path}/${roundId}`), snap => {
+        apply(snap.val());
+        paintSeats();
+      }, () => {});
+      extrasUnsubs.push(u);
+    } catch (_) {}
+  };
+  push('votesCast', v => { votesCastMap = v || {}; });
+  push('votes', v => { votesMap = v || {}; });
+  push('votesRevealed', v => { votesRevealedFlag = v === true; });
+}
+
+// Seats ringing the table: SECRET backs with name plates; gold ring for the
+// President, green for the Chancellor (dashed for the nominee), dimmed when
+// executed. A dot pops in once a ballot is cast (red after a revealed Nein).
+function paintSeats() {
+  const rails = ['seatTop', 'seatLeft', 'seatRight', 'seatBottom'].map(el);
+  if (rails.some(r => !r)) return;
+  const order = currentMeta.playerOrder || [];
+  const n = order.length;
+  if (!n) {
+    rails.forEach(r => { r.innerHTML = ''; });
+    return;
+  }
+  const topN = n >= 8 ? 2 : 1;
+  const bottomN = Math.ceil((n - topN) / 2);
+  const sideN = n - topN - bottomN;
+  const leftN = Math.ceil(sideN / 2);
+  const rightN = sideN - leftN;
+  const groups = [
+    order.slice(0, topN),
+    order.slice(topN, topN + leftN),
+    order.slice(topN + leftN, topN + leftN + rightN),
+    order.slice(topN + leftN + rightN),
+  ];
+  groups.forEach((uids, i) => {
+    rails[i].innerHTML = uids.map(seatHtml).join('');
+  });
+}
+
+function seatHtml(uid) {
+  const p = currentPlayers[uid] || {};
+  const classes = ['seat'];
+  let badge = '';
+  if (uid === currentMeta.presidentUid) { classes.push('president'); badge = 'PRESIDENT'; }
+  else if (uid === currentMeta.chancellorUid) { classes.push('chancellor'); badge = 'CHANCELLOR'; }
+  else if (currentMeta.phase === 'election' && uid === currentMeta.chancellorCandidateUid) { classes.push('candidate'); badge = 'NOMINEE'; }
+  if (p.alive === false) classes.push('dead');
+  const voted = votesCastMap && Object.prototype.hasOwnProperty.call(votesCastMap, uid);
+  if (voted) {
+    classes.push('voted');
+    if (votesRevealedFlag && votesMap && votesMap[uid] === 'nein') classes.push('voted-nein');
+  }
+  return `<div class="${classes.join(' ')}">` +
+    (badge ? `<span class="seat-badge">${badge}</span>` : '') +
+    `<img class="seat-card" src="img/back-role.png" alt="Secret role card" draggable="false" />` +
+    `<span class="vote-dot"></span>` +
+    `<span class="seat-name">${escapeHtml(p.name || '?')}</span></div>`;
+}
+
+// Draw/discard badges + the fanned face-down policy stack between boards.
+function paintPiles() {
+  const enacted = (currentMeta.liberalTrack || 0) + (currentMeta.fascistTrack || 0);
+  const deck = Number.isFinite(deckCount) ? deckCount : Math.max(0, 17 - enacted - discardCount);
+  const disc = Number.isFinite(discardCount) ? discardCount : 0;
+  const drawBadge = el('drawBadge');
+  const discBadge = el('discardBadge');
+  if (drawBadge) drawBadge.textContent = String(deck);
+  if (discBadge) discBadge.textContent = String(disc);
+  const dc = el('deckCount');
+  const dc2 = el('discardCount');
+  if (dc) dc.textContent = String(deck);
+  if (dc2) dc2.textContent = String(disc);
+  const fan = el('policyFan');
+  if (fan) {
+    const shown = Math.max(0, Math.min(5, deck));
+    const html = shown === 0
+      ? `<img src="img/back-tile.png" alt="Deck empty" draggable="false" style="opacity:0.35;transform:translateX(-50%) rotate(-6deg)" />`
+      : Array.from({ length: shown }, () =>
+          `<img src="img/back-tile.png" alt="Face-down policy" draggable="false" />`).join('');
+    if (fan.dataset.n !== String(shown)) {
+      fan.dataset.n = String(shown);
+      fan.innerHTML = html;
+    }
+  }
 }
 
 function escapeHtml(str) {

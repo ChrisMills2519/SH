@@ -9,8 +9,9 @@
 </head>
 <body>
   <div class="board-wrap">
-    <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room <span id="roomCode"></span></span> <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button></h1>
+    <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room <span id="roomCode"></span></span> <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button> <button id="narratorBtn" class="sound-toggle" type="button">🎙️ Narrator on</button></h1>
     <p class="muted">Phase: <span id="phaseLabel"></span></p>
+    <div id="narrBar" class="narr-bar" style="display:none"><span id="narrText"></span></div>
 
     <div id="gameOverBanner" class="role-banner" style="display:none"></div>
 
@@ -25,21 +26,37 @@
     </section>
 
     <section id="gamePanel" style="display:none">
-      <div class="boards">
-        <div class="board-stage" id="liberalBoard" aria-label="Liberal board">
-          <img class="board-img" src="img/board-liberal.png" alt="Official Liberal board" />
-          <div class="tile-layer" id="liberalTiles"></div>
-          <div class="pip-layer" id="trackerPips"></div>
+      <div class="table" id="table">
+        <div class="seat-row seat-top" id="seatTop" aria-label="Top seats"></div>
+        <div class="table-middle">
+          <div class="seat-col seat-left" id="seatLeft" aria-label="Left seats"></div>
+          <div class="table-center">
+            <div class="boards">
+              <div class="board-stage" id="liberalBoard" aria-label="Liberal board">
+                <img class="board-img" src="img/board-liberal.png" alt="Official Liberal board" />
+                <div class="tile-layer" id="liberalTiles"></div>
+                <div class="pip-layer" id="trackerPips"></div>
+                <div class="pile-badge pile-draw-badge" id="drawBadge" title="Tiles left in draw pile">17</div>
+              </div>
+              <div class="policy-well" id="policyWell" aria-label="Policy deck">
+                <div class="policy-fan" id="policyFan"></div>
+                <div class="policy-well-label muted"><span id="deckCount">17</span> in deck · <span id="discardCount">0</span> discarded</div>
+              </div>
+              <div class="board-stage" id="fascistBoard" aria-label="Fascist board">
+                <img class="board-img" id="fascistBoardArt" src="img/board-fascist-56.png" alt="Official Fascist board" />
+                <div class="tile-layer" id="fascistTiles"></div>
+                <div class="pile-badge pile-discard-badge" id="discardBadge" title="Tiles in discard pile">0</div>
+              </div>
+              <p class="muted"><span id="fascistBoardLabel">5–6 players</span> · Election tracker pips light up on the Liberal board.</p>
+            </div>
+          </div>
+          <div class="seat-col seat-right" id="seatRight" aria-label="Right seats"></div>
         </div>
-        <div class="board-stage" id="fascistBoard" aria-label="Fascist board">
-          <img class="board-img" id="fascistBoardArt" src="img/board-fascist-56.png" alt="Official Fascist board" />
-          <div class="tile-layer" id="fascistTiles"></div>
-        </div>
-        <p class="muted"><span id="fascistBoardLabel">5–6 players</span> · Election tracker pips light up on the Liberal board.</p>
+        <div class="seat-row seat-bottom" id="seatBottom" aria-label="Bottom seats"></div>
       </div>
 
       <h3>Players</h3>
-      <div class="player-list" id="playerChips"></div>
+      <div class="player-list" id="playerChips" style="display:none"></div>
 
       <div id="hostTools" style="display:none">
         <h3>Host tools</h3>
