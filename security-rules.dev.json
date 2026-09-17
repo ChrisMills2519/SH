@@ -1,0 +1,181 @@
+{
+  "rules": {
+    "games": {
+      "$roomId": {
+        "meta": {
+          ".read": "auth != null",
+          "hostUid": {
+            ".write": "auth != null && (!data.exists() || auth.uid === data.val())"
+          },
+          "presidentUid": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "chancellorCandidateUid": {
+            ".write": "auth != null && (auth.uid === data.parent().child('presidentUid').val() || auth.uid === data.parent().child('hostUid').val())"
+          },
+          "chancellorUid": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "presidentUidLast": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "phase": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "playerOrder": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "electionTracker": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3"
+          },
+          "liberalTrack": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5"
+          },
+          "fascistTrack": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 6"
+          },
+          "vetoUnlocked": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "winner": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "winReason": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "pendingPower": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "roundId": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()",
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "chancellorUidLast": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "specialElectionReturnUid": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "investigatedUids": {
+            ".write": "auth != null && auth.uid === data.parent().child('hostUid').val()"
+          },
+          "executionTarget": {
+            ".write": "auth != null && ((auth.uid === data.parent().child('presidentUid').val() && !data.exists()) || auth.uid === data.parent().child('hostUid').val())"
+          },
+          "specialElectionTarget": {
+            ".write": "auth != null && ((auth.uid === data.parent().child('presidentUid').val() && !data.exists()) || auth.uid === data.parent().child('hostUid').val())"
+          },
+          "investigateTarget": {
+            ".write": "auth != null && ((auth.uid === data.parent().child('presidentUid').val() && !data.exists()) || auth.uid === data.parent().child('hostUid').val())"
+          }
+        },
+
+        "players": {
+          ".read": "auth != null",
+          "$uid": {
+            // DEV ONLY: host full-write so the dev panel can create/delete bot seats.
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            "name": {
+              ".write": "auth != null && auth.uid === $uid"
+            },
+            "connected": {
+              ".write": "auth != null && auth.uid === $uid"
+            },
+            "joinedAt": {
+              ".write": "auth != null && auth.uid === $uid && !data.exists()"
+            },
+            "alive": {
+              ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+            }
+          }
+        },
+
+        "votes": {
+          "$roundId": {
+            ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            "$uid": {
+              ".read": "auth != null && root.child('games').child($roomId).child('votesRevealed').child($roundId).val() === true",
+              // DEV ONLY: host may cast bot votes.
+              ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()) && !data.exists() && (newData.val() === 'ja' || newData.val() === 'nein')"
+            }
+          }
+        },
+        "votesCast": {
+          "$roundId": {
+            ".read": "auth != null",
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && !data.exists()"
+            }
+          }
+        },
+        "votesRevealed": {
+          "$roundId": {
+            ".read": "auth != null",
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+          }
+        },
+
+        "secret": {
+          "roles": {
+            ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            "$uid": {
+              ".read": "auth != null && auth.uid === $uid",
+              ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && !data.exists()"
+            }
+          },
+          "knownTeammates": {
+            "$uid": {
+              ".read": "auth != null && auth.uid === $uid",
+              ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && !data.exists()"
+            }
+          },
+          "deck": {
+            ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+          },
+          "discard": {
+            ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val())",
+            ".write": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val())"
+          },
+          "legislative": {
+            "$roundId": {
+              "presidentDraw": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+              },
+              "chancellorHand": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                // DEV ONLY: host may discard for bot presidents.
+                ".write": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
+              },
+              "enactedTile": {
+                ".read": "auth != null",
+                // DEV ONLY: host may enact for bot chancellors.
+                ".write": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()) && (newData.val() === 'liberal' || newData.val() === 'fascist')"
+              }
+            }
+          },
+          "executive": {
+            "$roundId": {
+              "investigateResult": {
+                ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val()",
+                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && (newData.val() === 'liberal' || newData.val() === 'fascist')"
+              },
+              "policyPeek": {
+                ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val()",
+                ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+              },
+              "policyPeekSeen": {
+                ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+                ".write": "auth != null && ((auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() && !data.exists()) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

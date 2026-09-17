@@ -59,6 +59,14 @@ async function main() {
   });
 
   el('startBtn').addEventListener('click', startGame);
+
+  // --- DEV-ONLY START: solo-testing bots. Delete this block with dev-bots.js before game night. ---
+  if (new URLSearchParams(location.search).get('dev') === '1') {
+    const devPanel = document.getElementById('devPanel');
+    if (devPanel) devPanel.style.display = 'block';
+    import('./dev-bots.js').then(m => m.initDevBots({ room })).catch(e => console.warn('[devbots] load failed', e));
+  }
+  // --- DEV-ONLY END ---
 }
 
 // ---------------------------------------------------------------------------

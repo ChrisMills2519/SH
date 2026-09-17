@@ -63,3 +63,18 @@ Official art is wired in (`public/img/`): policy tiles, role cards, ballots, log
 deferred until after the first playtest), reconnect-with-same-identity if a phone's browser
 data is cleared (a refresh is fine, but a *new browser* means a new anonymous UID and no way
 back into your seat), and there's no spectator mode beyond the executed-player banner.
+
+<!-- DEV-ONLY START: delete this section with dev-bots.js before game night. -->
+## Dev testing (solo playtest shortcuts — remove before game night)
+
+- Board URL gets `&dev=1`, e.g. `board.html?room=DEVTEST&new=1&dev=1`, revealing a dev panel:
+  **Fill bots to 5 / 7** tops up the lobby with bot seats, **Remove bots** deletes them.
+- Bots run in the board page: always vote Ja, random nominate/discard/enact/power picks,
+  auto-ack Policy Peek. Drive 1–2 real seats (phone + incognito tab) and let bots do the rest.
+- Requires the dev database rules: `firebase deploy --only database --config firebase.dev.json
+  --project secreth-10e81`. **Revert right after testing** with `firebase deploy --only
+  database --project secreth-10e81` (prod `security-rules.json`).
+- Removal checklist: delete `public/js/dev-bots.js`, `security-rules.dev.json`,
+  `firebase.dev.json`, the `DEV-ONLY` blocks in `public/board.html` + `public/js/board.js`,
+  and this section. Then redeploy database + hosting.
+<!-- DEV-ONLY END -->
