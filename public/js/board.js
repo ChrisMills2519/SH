@@ -140,6 +140,25 @@ async function freshMeta() {
   return (await get(metaRef)).val() || {};
 }
 
+// Single-flight claims: exactly one driver may perform a given phase action,
+// across tabs, refreshes, and reconnects. The transaction commits only if the
+// key is absent; losers get committed=false and must abort. Without this,
+// a fresh subscription mid-phase (e.g. board refresh during legislation)
+// replays the current action — duplicate deals orphan tiles and duplicate
+// enactments double-count tracks.
+async function claim(key) {
+  try {
+    const res = await runTransaction(ref(db, `games/${room}/secret/claims/${key}`), cur => {
+      if (cur !== null && cur !== undefined) return undefined;
+      return { by: myUid, at: Date.now() };
+    });
+    return res.committed === true;
+  } catch (e) {
+    console.warn(`[claim ${key}] failed:`, e && e.message);
+    return false;
+  }
+}
+
 function watchForNomination() {
   // NB: onValue can invoke the callback synchronously with cached data,
   // before `unsub` is assigned — hence the done-flag + guarded unsub.
@@ -152,6 +171,7 @@ function watchForNomination() {
     if (!candidate) return;
     const m = await freshMeta();
     if (m.phase !== 'nomination' || (m.roundId || 0) !== entryRound) return;
+    if (!(await claim(`nominate-${entryRound}`))) return;
     done = true;
     if (typeof unsub === 'function') unsub();
     const roundId = (currentMeta.roundId || 0) + 1;
@@ -173,6 +193,7 @@ function watchForVotes() {
     if (m.phase !== 'election' || (m.roundId || 0) !== roundId) return;
     const revealed = await get(ref(db, `games/${room}/votesRevealed/${roundId}`));
     if (revealed.val() === true) return;
+    if (!(await claim(`election-${roundId}`))) return;
     done = true;
     if (typeof unsub === 'function') unsub();
     await set(ref(db, `games/${room}/votesRevealed/${roundId}`), true);
@@ -193,7 +214,7 @@ async function resolveElection(majority) {
     } else {
       await update(metaRef, { electionTracker: tracker, chancellorCandidateUid: null });
     }
-    advancePresidency(false);
+    advancePresidency(false).catch(e => console.warn('[board] advance failed:', e && e.message));
     return;
   }
 
@@ -350,7 +371,7 @@ function watchForPresidentDiscard() {
     if (m.phase !== 'legislative_president' || (m.roundId || 0) !== roundId) return;
     done = true;
     if (typeof unsub === 'function') unsub();
-    update(metaRef, { phase: 'legislative_chancellor' });
+    update(metaRef, { phase: 'legislative_chancellor' }).catch(e => console.warn('[board] phase flip failed:', e && e.message));
   });
 }
 
@@ -364,6 +385,7 @@ function watchForChancellorEnact() {
     if (!tile) return;
     const m = await freshMeta();
     if (m.phase !== 'legislative_chancellor' || (m.roundId || 0) !== roundId) return;
+    if (!(await claim(`enact-${roundId}`))) return;
     done = true;
     if (typeof unsub === 'function') unsub();
     const field = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
@@ -385,7 +407,7 @@ function watchForChancellorEnact() {
         return;
       }
     }
-    advancePresidency();
+    advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
   });
 }
 
@@ -413,6 +435,7 @@ function watchForVeto() {
       return;
     }
     if (decision !== 'agreed') return;
+    if (!(await claim(`veto-${roundId}`))) return;
     const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
     const hand = handSnap.val();
     const tiles = Array.isArray(hand) ? hand : Object.values(hand || {});
@@ -424,17 +447,18 @@ function watchForVeto() {
     if (tracker >= 3) {
       const win = await runChaos();
       if (win) return;
-      advancePresidency(false);
+      advancePresidency(false).catch(e => console.warn('[board] advance failed:', e && e.message));
       return;
     }
     await update(metaRef, { electionTracker: tracker });
-    advancePresidency();
+    advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
   });
 }
 
 async function watchForExecutiveAction() {
 
   const power = currentMeta.pendingPower;
+  const roundId = currentMeta.roundId;
   if (power === 'execution') {
     let done = false;
     let unsub = null;
@@ -444,6 +468,7 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'execution') return;
+      if (!(await claim(`power-${roundId}`))) return;
       done = true;
       if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
@@ -455,7 +480,7 @@ async function watchForExecutiveAction() {
       });
       const win = checkExecutionWin({ executedUid: target, roles });
       if (win) return endGame(win);
-      advancePresidency();
+      advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
     });
   } else if (power === 'investigate_loyalty') {
     let done = false;
@@ -466,6 +491,7 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'investigate_loyalty') return;
+      if (!(await claim(`power-${roundId}`))) return;
       done = true;
       if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
@@ -478,7 +504,7 @@ async function watchForExecutiveAction() {
         'meta/investigateTarget': null,
         'meta/pendingPower': null,
       });
-      advancePresidency();
+      advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
     });
   } else if (power === 'special_election') {
     let done = false;
@@ -489,6 +515,7 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'special_election') return;
+      if (!(await claim(`power-${roundId}`))) return;
       done = true;
       if (typeof unsub === 'function') unsub();
       const enacting = currentMeta.presidentUid;
@@ -527,10 +554,11 @@ async function watchForExecutiveAction() {
       if (snap.val() !== true) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'policy_peek') return;
+      if (!(await claim(`power-${roundId}`))) return;
       peekDone = true;
       if (typeof unsub === 'function') unsub();
       await update(ref(db, `games/${room}`), { 'meta/pendingPower': null });
-      advancePresidency();
+      advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
     });
   }
 }

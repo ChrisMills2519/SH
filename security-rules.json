@@ -133,6 +133,12 @@
             ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
             ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
           },
+          "claims": {
+            ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            "$key": {
+              ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+            }
+          },
           "discard": {
             ".read": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val())",
             ".write": "auth != null && (auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('presidentUid').val() || auth.uid === root.child('games').child($roomId).child('meta').child('chancellorUid').val())"
