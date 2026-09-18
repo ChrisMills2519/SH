@@ -1,6 +1,6 @@
 import { db, ensureSignedIn } from './firebase-config.js';
 import {
-  ref, get, set, update, onValue,
+  ref, get, set, update, remove, onValue,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 import { ineligibleChancellorCandidates } from './game-logic.js';
 import { playSound, initSoundToggle } from './sound.js';
@@ -17,6 +17,7 @@ let myRole = null;
 let myTeammates = [];
 let renderedForRound = {}; // avoid re-rendering the same one-shot UI repeatedly
 let roleRevealed = false; // tap-to-reveal: role starts facedown each session
+let roleSeen = false; // viewed at least once: gates actions until the player knows their role
 let revealedCards = {}; // "roundId:idx" / "peek:roundId:idx" -> true once flipped face-up
 let presidentDrawDoneFor = null; // roundId fully painted with tiles (one-shot get, not live)
 let presidentDrawInflightFor = null; // roundId currently fetching (prevents overlapping paints)
@@ -31,6 +32,14 @@ async function main() {
   const user = await ensureSignedIn();
   myUid = user.uid;
   initSoundToggle();
+
+  // Reconnect path (?reconnect=1): this browser has a fresh uid (cleared
+  // storage or a new device) and must prove it owns an existing seat via
+  // the reconnect code, instead of joining as a brand-new player.
+  if (params.get('reconnect') === '1') {
+    await runReconnectFlow();
+    return;
+  }
 
   const name = nameFromUrl || prompt('Your name:');
 
@@ -56,6 +65,11 @@ async function main() {
     joinedAt: Date.now(),
   });
 
+  await ensureMyPin();
+  attachListeners();
+}
+
+function attachListeners() {
   onValue(ref(db, `games/${room}/players`), snap => {
     currentPlayers = snap.val() || {};
     render();
@@ -74,6 +88,150 @@ async function main() {
   onValue(ref(db, `games/${room}/secret/knownTeammates/${myUid}`), snap => {
     myTeammates = snap.val() || [];
     render();
+  });
+
+  // Night-reveal ack mirror: the host clears players/{uid}/roleSeen at game
+  // start and the board auto-advances once all living seats ack. This listener
+  // is the source of truth for the local gate — a fresh game (null) resets the
+  // gate even when the dealt role happens to match last game's, and a refresh
+  // restores `roleSeen` without forcing a redundant re-tap (card stays
+  // facedown until tapped: hide/recall preserved).
+  onValue(ref(db, `games/${room}/players/${myUid}/roleSeen`), snap => {
+    if (snap.val() === true) {
+      if (!roleSeen) { roleSeen = true; render(); }
+    } else if (roleSeen || roleRevealed) {
+      roleSeen = false;
+      roleRevealed = false;
+      render();
+    }
+  }, () => {});
+}
+
+// Best-effort night ack: optimistic local flip (works offline), mirrored to
+// the board when the rules permit. Failures only delay auto-advance — the
+// host skip button remains the escape hatch.
+async function ackRoleSeen() {
+  roleSeen = true;
+  try {
+    await update(ref(db, `games/${room}/players/${myUid}`), { roleSeen: true });
+  } catch (e) {
+    console.warn('[play] roleSeen ack failed:', e && e.message);
+  }
+}
+
+// Reconnect PIN: self-issued once per uid (write-once rule), shown once so
+// the player can rejoin from another device. A refresh reuses the stored
+// PIN instead of minting a new one; localStorage is a same-device bonus.
+async function ensureMyPin() {
+  let pin = null;
+  try {
+    pin = (await get(ref(db, `games/${room}/secret/reconnectPins/${myUid}`))).val() || null;
+  } catch (_) { /* offline read: fall through and try to issue */ }
+  if (typeof pin !== 'string' || !/^[0-9]{4}$/.test(pin)) {
+    pin = String(Math.floor(1000 + Math.random() * 9000));
+    try {
+      await set(ref(db, `games/${room}/secret/reconnectPins/${myUid}`), pin);
+    } catch (e) {
+      console.warn('[play] pin store failed:', e && e.message);
+    }
+  }
+  try { localStorage.setItem(`sh_reconnect_${room}`, pin); } catch (_) {}
+  const banner = el('pinBanner');
+  if (banner) {
+    banner.style.display = 'block';
+    banner.textContent = `Your reconnect code: ${pin} — save it in case you need to rejoin from another device.`;
+  }
+}
+
+// Reconnect flow: file a write-once reclaim request carrying name + PIN and
+// wait. The host migrates the old seat onto this fresh uid on a match, or
+// marks status=rejected on a wrong code. No players node is written before
+// approval, so a failed code leaves no ghost seat behind.
+async function runReconnectFlow() {
+  el('main').innerHTML = '';
+  const metaSnap = await get(ref(db, `games/${room}/meta`));
+  if (!metaSnap.exists()) {
+    el('status').textContent = 'Room not found. Check the code and try again.';
+    return;
+  }
+  const box = el('reconnectBox');
+  box.style.display = 'block';
+  if (nameFromUrl) el('reconnectName').value = nameFromUrl;
+  el('status').textContent = 'Reconnect to your seat';
+  el('reconnectBtn').addEventListener('click', async () => {
+    const name = el('reconnectName').value.trim();
+    const pin = el('reconnectPin').value.trim();
+    const statusEl = el('reconnectStatus');
+    if (!name) { statusEl.textContent = 'Enter your name.'; return; }
+    if (!/^[0-9]{4}$/.test(pin)) { statusEl.textContent = 'Enter the 4-digit code from your original device.'; return; }
+    el('reconnectBtn').disabled = true;
+    statusEl.textContent = 'Waiting for the board to move your seat over...';
+    try {
+      await set(ref(db, `games/${room}/reclaimRequests/${myUid}`), { name, pin, createdAt: Date.now() });
+    } catch (e) {
+      el('reconnectBtn').disabled = false;
+      statusEl.textContent = 'Could not send the request. Check the room code and try again.';
+      return;
+    }
+    watchReclaimOutcome(name, pin, statusEl);
+  });
+}
+
+// Outcome watch: status=approved (or role arrival, same update) means the
+// host migrated us; status=rejected means a wrong code. Either terminal
+// state deletes our node (create-or-delete is allowed) so a retry starts
+// clean; the host sweep is the backstop if we go away first. We write our
+// own players node on entry (name/connected are self-write-only) and join
+// normally — the migrated secrets arrive live.
+function watchReclaimOutcome(name, pin, statusEl) {
+  let settled = false;
+  let sawRequest = false;
+  const reqRef = ref(db, `games/${room}/reclaimRequests/${myUid}`);
+  const enterAfterApproval = async () => {
+    if (settled) return;
+    settled = true;
+    el('reconnectBox').style.display = 'none';
+    try { await remove(reqRef); } catch (_) {}
+    await update(ref(db, `games/${room}/players/${myUid}`), {
+      name,
+      connected: true,
+      joinedAt: Date.now(),
+    });
+    await ensureMyPin();
+    attachListeners();
+  };
+  onValue(reqRef, async snap => {
+    if (settled) return;
+    const v = snap.val();
+    if (v) {
+      sawRequest = true;
+      if (v.status === 'rejected') {
+        settled = true;
+        el('reconnectBtn').disabled = false;
+        statusEl.textContent = 'Code not recognized. Check the room, name, and code, then try again.';
+        // Clear our node so a corrected retry isn't blocked by write-once.
+        try { await remove(reqRef); } catch (_) {}
+      } else if (v.status === 'approved') {
+        await enterAfterApproval();
+      }
+      return;
+    }
+    // No node: either our set landed after this listener attached, or a
+    // sweep cleared a terminal state we never saw. (Re)file once observed —
+    // the host answers idempotently, so this always terminates.
+    if (sawRequest) await enterAfterApproval();
+    else {
+      try {
+        await set(reqRef, { name, pin, createdAt: Date.now() });
+      } catch (_) {
+        el('reconnectBtn').disabled = false;
+        statusEl.textContent = 'Could not send the request. Check the room code and try again.';
+      }
+    }
+  });
+  onValue(ref(db, `games/${room}/secret/roles/${myUid}`), async snap => {
+    if (settled || !snap.val()) return;
+    await enterAfterApproval();
   });
 }
 
@@ -99,7 +257,18 @@ function render() {
 
   if (!myRole) {
     dropLiveSubs();
-    el('main').innerHTML = `<p class="muted">Waiting for the host to start the game...</p>`;
+    el('main').innerHTML = `<p class="muted waiting">Waiting for the host to start the game...</p>`;
+    return;
+  }
+
+  // First-run gate: no action (vote, nominate, legislation, power) is shown
+  // until the player has viewed their role at least once — joining mid-game
+  // otherwise drops them straight onto ballots they don't understand.
+  // Distinct from roleRevealed (the hide/show display toggle): hiding the
+  // card after viewing must not re-trigger this gate.
+  if (!roleSeen) {
+    dropLiveSubs();
+    renderRoleGate();
     return;
   }
 
@@ -107,6 +276,7 @@ function render() {
     dropLiveSubs();
     el('main').innerHTML = `
       <div class="role-banner dead">You have been executed.</div>
+      <div class="dead-stamp">EXECUTED</div>
       <p class="muted">You are out of the game — sit back and watch. ${escapeHtml(describeWhosTurn())}</p>
     `;
     return;
@@ -160,6 +330,41 @@ function render() {
   renderIdle();
 }
 
+function renderRoleGate() {
+  const roleLabel = myRole === 'hitler' ? 'Hitler' : myRole[0].toUpperCase() + myRole.slice(1);
+  const roleImg = myRole === 'hitler' ? 'role-hitler' : `role-${myRole}`;
+  el('main').innerHTML = `
+    <div class="flip-scene center tappable" id="roleScene">
+      <div class="flip-inner flipped" id="roleFlip">
+        <img class="role-img flip-face" src="img/${roleImg}.png" alt="${roleLabel}" />
+        <img class="role-img flip-face flip-back" src="img/back-role.png" alt="Your secret role — tap to reveal" />
+      </div>
+      <div class="classified-stamp" aria-hidden="true">CLASSIFIED</div>
+    </div>
+    <p class="role-caption">Tap to reveal your role — shield your screen</p>
+    <p>${escapeHtml(describeWhosTurn())}</p>
+  `;
+  el('roleScene').addEventListener('click', () => {
+    playSound('flip');
+    el('roleScene').classList.add('revealed');
+    el('roleFlip').classList.remove('flipped');
+    flashFactionReveal(myRole);
+    setTimeout(() => { roleRevealed = true; ackRoleSeen(); render(); }, FLIP_MS);
+  });
+}
+
+// Faction-color screen flash on role reveal (fascist/Hitler = crimson,
+// liberal = navy). Body class drives a ::after overlay animation in CSS.
+function flashFactionReveal(role) {
+  try {
+    const cls = role === 'liberal' ? 'reveal-liberal' : 'reveal-fascist';
+    document.body.classList.remove('reveal-liberal', 'reveal-fascist');
+    void document.body.offsetWidth; // restart the animation
+    document.body.classList.add(cls);
+    setTimeout(() => document.body.classList.remove(cls), 950);
+  } catch (_) {}
+}
+
 function renderIdle() {
   dropLiveSubs();
   const roleLabel = myRole === 'hitler' ? 'Hitler' : myRole[0].toUpperCase() + myRole.slice(1);
@@ -173,14 +378,17 @@ function renderIdle() {
           <img class="role-img flip-face" src="img/${roleImg}.png" alt="${roleLabel}" />
           <img class="role-img flip-face flip-back" src="img/back-role.png" alt="Your secret role — tap to reveal" />
         </div>
+        <div class="classified-stamp" aria-hidden="true">CLASSIFIED</div>
       </div>
       <p class="role-caption">Tap to reveal your role</p>
-      <p>${whosTurn}</p>
+      <p>${escapeHtml(whosTurn)}</p>
     `;
     el('roleScene').addEventListener('click', () => {
       playSound('flip');
+      el('roleScene').classList.add('revealed');
       el('roleFlip').classList.remove('flipped');
-      setTimeout(() => { roleRevealed = true; render(); }, FLIP_MS);
+      flashFactionReveal(myRole);
+      setTimeout(() => { roleRevealed = true; ackRoleSeen(); render(); }, FLIP_MS);
     });
     return;
   }
@@ -192,14 +400,21 @@ function renderIdle() {
     <img class="role-img" src="img/${roleImg}.png" alt="${roleLabel}" />
     <p class="role-caption">${roleLabel}</p>
     ${teamHtml}
-    <p>${whosTurn}</p>
+    <p>${escapeHtml(whosTurn)}</p>
+    <button id="roleHideBtn">Hide role</button>
   `;
+  el('roleHideBtn').addEventListener('click', () => {
+    playSound('flip');
+    roleRevealed = false;
+    render();
+  });
 }
 
 function describeWhosTurn() {
   const phase = currentMeta.phase;
   const presName = nameOf(currentMeta.presidentUid);
   const chanName = nameOf(currentMeta.chancellorUid);
+  if (phase === 'night') return 'Night falls — reveal your role, then hide it again.';
   if (phase === 'nomination') return `${presName} is nominating a Chancellor.`;
   if (phase === 'legislative_president') return `${presName} is choosing a policy.`;
   if (phase === 'legislative_chancellor') return `${chanName} is choosing a policy.`;
@@ -250,21 +465,24 @@ function renderVoting() {
   const roundId = currentMeta.roundId;
   const key = `vote-${roundId}`;
   if (renderedForRound[key]) {
-    el('main').innerHTML = `<p class="muted">Vote cast. Waiting for everyone else...</p>`;
+    el('main').innerHTML = `<p class="muted waiting">Vote cast. Waiting for everyone else...</p>`;
     return;
   }
   pingOnce(`vote-${roundId}`);
   el('main').innerHTML = `
-    <h2>${nameOf(currentMeta.presidentUid)} nominates ${nameOf(currentMeta.chancellorCandidateUid)}</h2>
-    <div class="vote-buttons">
-      <button class="ballot ja" id="jaBtn"><div class="flip-scene"><div class="flip-inner" id="jaFlip">
-        <img src="img/ballot-ja.png" alt="Ja!" class="flip-face" />
-        <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
-      </div></div></button>
-      <button class="ballot nein" id="neinBtn"><div class="flip-scene"><div class="flip-inner" id="neinFlip">
-        <img src="img/ballot-nein.png" alt="Nein!" class="flip-face" />
-        <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
-      </div></div></button>
+    <h2>${escapeHtml(nameOf(currentMeta.presidentUid))} nominates ${escapeHtml(nameOf(currentMeta.chancellorCandidateUid))}</h2>
+    <div class="vote-frame">
+      <div class="vote-frame-header">Cast Your Vote</div>
+      <div class="vote-buttons">
+        <button class="ballot ja" id="jaBtn"><div class="flip-scene"><div class="flip-inner" id="jaFlip">
+          <img src="img/ballot-ja.png" alt="Ja!" class="flip-face" />
+          <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
+        </div></div></button>
+        <button class="ballot nein" id="neinBtn"><div class="flip-scene"><div class="flip-inner" id="neinFlip">
+          <img src="img/ballot-nein.png" alt="Nein!" class="flip-face" />
+          <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
+        </div></div></button>
+      </div>
     </div>
   `;
   const castVote = async choice => {
@@ -350,7 +568,7 @@ async function renderPresidentDraw() {
       // Pass-through: the board forwards the single tile (idx -1 = no choice).
       playSound('tile-draw');
       await set(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDiscardIdx`), -1);
-      el('main').innerHTML = `<p class="muted">Sent to the Chancellor. Waiting...</p>`;
+      el('main').innerHTML = `<p class="muted waiting">Sent to the Chancellor. Waiting...</p>`;
     });
     return;
   }
@@ -369,7 +587,7 @@ async function renderPresidentDraw() {
       const idx = Number(elm.dataset.idx);
       playSound('tile-draw');
       await set(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDiscardIdx`), idx);
-      el('main').innerHTML = `<p class="muted">Sent to the Chancellor. Waiting...</p>`;
+      el('main').innerHTML = `<p class="muted waiting">Sent to the Chancellor. Waiting...</p>`;
     });
   });
 }
@@ -420,7 +638,7 @@ function renderChancellorHand() {
       const decSnap = await get(ref(db, `${base}/vetoDecision`));
       const decision = decSnap.val();
       if (!decision) {
-        el('main').innerHTML = `<p class="muted">Veto requested. Waiting for the President to agree or refuse...</p>`;
+        el('main').innerHTML = `<p class="muted waiting">Veto requested. Waiting for the President to agree or refuse...</p>`;
         return;
       }
       if (decision === 'agreed') {
@@ -447,7 +665,7 @@ function renderChancellorHand() {
         const idx = Number(elm.dataset.idx);
         playSound('tile-draw');
         await set(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorEnactIdx`), idx);
-        el('main').innerHTML = `<p class="muted">Policy enacted. Waiting...</p>`;
+        el('main').innerHTML = `<p class="muted waiting">Policy enacted. Waiting...</p>`;
       });
     });
     const vetoBtn = document.getElementById('vetoBtn');
@@ -455,7 +673,7 @@ function renderChancellorHand() {
       vetoBtn.addEventListener('click', async () => {
         playSound('vote-cast');
         await set(ref(db, `${base}/vetoRequested`), true);
-        el('main').innerHTML = `<p class="muted">Veto requested. Waiting for the President...</p>`;
+        el('main').innerHTML = `<p class="muted waiting">Veto requested. Waiting for the President...</p>`;
       });
     }
   }));
@@ -507,7 +725,7 @@ function renderExecution() {
   const order = currentMeta.playerOrder || [];
   const options = order.filter(uid => uid !== myUid && currentPlayers[uid] && currentPlayers[uid].alive !== false);
   el('main').innerHTML = `
-    <h2 class="power-title"><img class="power-icon" src="img/icon-execution.png" alt="" />Choose a player to execute</h2>
+    <div class="power-header execution"><img class="power-icon" src="img/icon-execution.png" alt="" /><span>Choose a player to execute</span></div>
     ${options.map(uid => `<button data-uid="${uid}" class="executeBtn">${escapeHtml(nameOf(uid))}</button>`).join('')}
   `;
   document.querySelectorAll('.executeBtn').forEach(btn => {
@@ -550,7 +768,7 @@ function renderInvestigate() {
   const investigated = currentMeta.investigatedUids || {};
   const options = order.filter(uid => uid !== myUid && !investigated[uid] && currentPlayers[uid] && currentPlayers[uid].alive !== false);
   el('main').innerHTML = `
-    <h2 class="power-title"><img class="power-icon" src="img/icon-investigate.png" alt="" />Investigate Loyalty</h2>
+    <div class="power-header investigate"><img class="power-icon" src="img/icon-investigate.png" alt="" /><span>Investigate Loyalty</span></div>
     <p class="muted">Pick a player to learn whether they are Liberal or Fascist.</p>
     <div id="investigateOptions">${options.map(uid => `<button data-uid="${uid}" class="investigateBtn">${escapeHtml(nameOf(uid))}</button>`).join('')}</div>
     <div id="investigateResult"></div>
@@ -572,7 +790,7 @@ function renderSpecialElection() {
   const order = currentMeta.playerOrder || [];
   const options = order.filter(uid => uid !== myUid && currentPlayers[uid] && currentPlayers[uid].alive !== false);
   el('main').innerHTML = `
-    <h2 class="power-title"><img class="power-icon" src="img/icon-special-election.png" alt="" />Special Election</h2>
+    <div class="power-header special"><img class="power-icon" src="img/icon-special-election.png" alt="" /><span>Special Election</span></div>
     <p class="muted">Choose any other living player to be President next.</p>
     ${options.map(uid => `<button data-uid="${uid}" class="specialBtn">${escapeHtml(nameOf(uid))}</button>`).join('')}
   `;
@@ -591,7 +809,7 @@ function renderPolicyPeek() {
   // second render() must not rewind to "Loading..." after tiles are shown.
   if (peekPaintedFor === roundId) return;
   pingOnce(`pow-${roundId}`);
-  el('main').innerHTML = `<h2 class="power-title"><img class="power-icon" src="img/icon-peek.png" alt="" />Policy Peek</h2><p class="muted">Loading top 3 policies...</p>`;
+  el('main').innerHTML = `<div class="power-header peek"><img class="power-icon" src="img/icon-peek.png" alt="" /><span>Policy Peek</span></div><p class="muted waiting">Loading top 3 policies...</p>`;
   // Board writes the peek after entering executive_action, so listen live.
   ensureLiveSub(`peek-${roundId}`, () => onValue(ref(db, `games/${room}/secret/executive/${roundId}/policyPeek`), async snap => {
     if (isStaleView(roundId, 'executive_action', 'policy_peek')) return;
@@ -600,7 +818,7 @@ function renderPolicyPeek() {
     peekPaintedFor = roundId;
     playSound('tile-draw');
     el('main').innerHTML = `
-      <h2 class="power-title"><img class="power-icon" src="img/icon-peek.png" alt="" />Policy Peek</h2>
+      <div class="power-header peek"><img class="power-icon" src="img/icon-peek.png" alt="" /><span>Policy Peek</span></div>
       <p class="muted">Top 3 deck tiles (only you see this). Tap each card to peek, then Done.</p>
       <div class="policy-choice">
         ${(Array.isArray(tiles) ? tiles : Object.values(tiles)).map((t, i) => policyFlipTile(t, i, `peek:${roundId}`)).join('')}

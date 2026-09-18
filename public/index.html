@@ -3,13 +3,17 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#1a1816" />
 <title>Secret Hitler</title>
 <link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=Special+Elite&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,700;6..96,900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css" />
 </head>
 <body class="centered">
   <main class="card">
-    <h1><img class="logo" src="img/logo.png" alt="Secret Hitler" /></h1>
+    <h1 class="game-title"><img class="logo" src="img/logo.png" alt="Secret Hitler" /></h1>
     <p class="muted">Unofficial digital play aid. Fan adaptation, non-commercial, under
       <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener">CC BY-NC-SA 4.0</a>.
       Original game by Mike Boxleiter, Tommy Maranges &amp; Mac Schubert —
@@ -26,7 +30,7 @@
 
     <section>
       <h2>Join on your phone</h2>
-      <input id="nameInput" type="text" placeholder="Your name" maxlength="20" />
+      <input id="nameInput" type="text" placeholder="Your name" maxlength="20" inputmode="text" />
       <input id="roomInput" type="text" placeholder="Room code" maxlength="6" style="text-transform:uppercase" />
       <button id="joinBtn">Join Game</button>
     </section>

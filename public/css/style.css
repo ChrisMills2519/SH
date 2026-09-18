@@ -1,12 +1,23 @@
 :root {
-  --bg: #16181c;
-  --panel: #22252b;
+  /* 1930s Weimar / propaganda-poster palette: warm charcoal, newsprint
+     off-white, aged gold. Faction colors stay true to the official art. */
+  --bg: #1a1816;
+  --bg-paper: #241f1a;
+  --panel: #2d2824;
   --liberal: #3b6fd6;
   --fascist: #a3282f;
+  --fascist-bright: #c0392b;
   --hitler: #6b0f16;
-  --text: #f2f2f2;
-  --muted: #9aa0a8;
-  --accent: #d6b13b;
+  --text: #e8e0d4;
+  --muted: #8a8078;
+  --accent: #c9a84c;
+  --accent-dark: #8b7230;
+  --border: #3a3530;
+  --ink: #141210;
+  --shadow-hard: 3px 3px 0px #000;
+  --font-display: 'Playfair Display', 'Bodoni Moda', Georgia, serif;
+  --font-body: 'EB Garamond', Georgia, serif;
+  --font-mono: 'Special Elite', 'Courier New', monospace;
 }
 
 * { box-sizing: border-box; }
@@ -16,56 +27,194 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body);
 }
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    repeating-conic-gradient(rgba(232,224,212,0.02) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px,
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.05) 3px 4px),
+    radial-gradient(ellipse at 30% 20%, rgba(160,120,60,0.09) 0%, transparent 60%),
+    radial-gradient(ellipse at 70% 80%, rgba(140,60,40,0.07) 0%, transparent 60%);
+  pointer-events: none;
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);
+  pointer-events: none;
+}
+body, body > * { position: relative; z-index: 1; }
 
 body.centered {
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
+  min-height: 100dvh;
+  min-height: 100vh; /* fallback */
 }
 
 .card {
-  background: var(--panel);
-  border-radius: 12px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.06) 3px 4px),
+    var(--panel);
+  border: 2px solid #000;
+  outline: 1px solid var(--border);
+  border-radius: 2px;
   padding: 28px;
   max-width: 420px;
   width: 100%;
+  box-shadow:
+    var(--shadow-hard),
+    inset 0 0 0 1px rgba(201,168,76,0.15);
 }
 
-h1 { margin-top: 0; color: var(--accent); }
+.card .game-title .logo {
+  filter: drop-shadow(0 2px 8px rgba(201,168,76,0.3));
+}
 
-section { margin: 20px 0; }
+h1 {
+  margin-top: 0;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0px #000;
+}
+h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.game-title {
+  font-family: 'UnifrakturMaguntia', cursive;
+  font-size: 1.1em;
+  letter-spacing: 0.02em;
+}
+
+section {
+  margin: 20px 0;
+  position: relative;
+}
+section + section::before {
+  content: "";
+  display: block;
+  width: 60px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  margin: 0 auto 20px;
+}
 
 input {
   display: block;
   width: 100%;
-  padding: 10px;
+  padding: 10px 4px;
   margin: 8px 0;
-  border-radius: 6px;
-  border: 1px solid #444;
-  background: #1b1d22;
+  border-radius: 0;
+  border: none;
+  border-bottom: 2px dashed var(--muted);
+  background: rgba(232,224,212,0.05);
   color: var(--text);
+  font-family: var(--font-mono);
   font-size: 16px;
+  letter-spacing: 0.05em;
 }
+input:focus {
+  border-bottom-color: var(--accent);
+  border-bottom-style: solid;
+  background: rgba(201,168,76,0.08);
+  outline: none;
+}
+input::placeholder { color: var(--muted); opacity: 0.7; }
 
+/* Propaganda-stamp buttons: hard offset shadow, sharp corners, loud type. */
 button {
   padding: 12px 18px;
-  border-radius: 6px;
-  border: none;
+  border-radius: 2px;
+  border: 2px solid #000;
   background: var(--accent);
-  color: #1b1d22;
-  font-weight: 600;
-  font-size: 16px;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-hard);
   cursor: pointer;
   width: 100%;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.15s ease;
 }
 
-button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 
-.muted { color: var(--muted); font-size: 14px; }
-.error { color: #ff8080; min-height: 20px; }
+button:hover:not(:disabled) { filter: brightness(1.08); }
+button:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px #000;
+  filter: brightness(0.95);
+}
+button.secondary {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+button.secondary:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  background: rgba(201,168,76,0.1);
+}
+
+input:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+input:focus:not(:focus-visible), button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+img { background: var(--panel); }
+
+.policy-tile-img, .seat-card, .flip-face, .ballot img {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.muted { color: var(--muted); font-size: 14px; font-style: italic; }
+.muted.telegram, #status, #ppStatus {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  padding: 6px 0;
+  color: var(--muted);
+}
+.error {
+  color: #ff8080;
+  min-height: 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
 
 /* Board layout */
 .board-wrap {
@@ -74,6 +223,10 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 24px;
 }
 
+.board-header { margin-bottom: 16px; }
+.board-header-top h1 { margin: 0 0 8px; }
+.board-header-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+
 .player-list { display: flex; flex-wrap: wrap; gap: 12px; }
 
 .player-chip {
@@ -81,18 +234,61 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   border-radius: 20px;
   background: var(--panel);
   border: 2px solid #444;
+  font-family: 'EB Garamond', serif;
+  font-size: 15px;
 }
 
-.player-chip.president { border-color: var(--accent); }
-.player-chip.chancellor { border-color: #6fd68b; }
+.player-chip.president {
+  border-color: var(--accent);
+  border-left: 4px solid var(--accent);
+  background: linear-gradient(90deg, rgba(201,168,76,0.12), var(--panel));
+}
+.player-chip.chancellor {
+  border-color: #6fd68b;
+  border-left: 4px solid #6fd68b;
+  background: linear-gradient(90deg, rgba(111,214,139,0.12), var(--panel));
+}
 .player-chip.dead { opacity: 0.35; text-decoration: line-through; }
+
+/* Telegram / dossier header: dashed rules, typewriter type, loud spacing. */
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0,0,0,0.35);
+  border: none;
+  border-top: 1px dashed var(--muted);
+  border-bottom: 1px dashed var(--muted);
+  border-left: 3px solid var(--accent);
+  border-radius: 0;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
 
 .role-banner {
   text-align: center;
   padding: 40px 20px;
-  border-radius: 12px;
+  border-radius: 2px;
+  border: 3px solid #000;
+  box-shadow: var(--shadow-hard);
   margin-bottom: 20px;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 24px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0px rgba(0,0,0,0.6);
 }
+@keyframes banner-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+.role-banner { animation: banner-in 0.5s ease-out; }
 
 .role-banner.liberal { background: var(--liberal); }
 .role-banner.fascist { background: var(--fascist); }
@@ -109,8 +305,10 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .policy-tile {
   width: 100px;
   height: 140px;
-  border-radius: 8px;
-  border: 3px solid #444;
+  border-radius: 4px;
+  border: 2px solid #000;
+  outline: 1px solid var(--border);
+  box-shadow: 3px 3px 0px rgba(0,0,0,0.8);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -121,14 +319,23 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .policy-tile.liberal { background: var(--liberal); }
 .policy-tile.fascist { background: var(--fascist); }
-.policy-tile:hover { border-color: var(--accent); }
+.policy-tile:hover { outline-color: var(--accent); }
 
 .qr-box { text-align: center; margin: 20px 0; }
 .qr-box img { background: #fff; padding: 10px; border-radius: 8px; }
 
 .vote-buttons { display: flex; gap: 12px; }
-.vote-buttons button.ja { background: #4a9e5c; }
-.vote-buttons button.nein { background: var(--fascist); color: #fff; }
+.vote-buttons button.ja { background: #4a9e5c; color: #10241a; }
+.vote-buttons button.nein { background: var(--fascist-bright); color: #fff; }
+.vote-buttons #vetoRefuseBtn { background: var(--fascist-bright); color: #fff; }
+.vote-buttons button:not(.ballot) {
+  border: 2px solid #000;
+  box-shadow: var(--shadow-hard);
+}
+.vote-buttons button:not(.ballot):active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px #000;
+}
 
 /* Official art assets (public/img/) */
 .role-img {
@@ -137,20 +344,27 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   max-width: 260px;
   height: auto;
   margin: 0 auto 8px;
-  border-radius: 12px;
+  border-radius: 4px;
+  border: 2px solid #000;
+  box-shadow: var(--shadow-hard);
 }
 
 .role-caption {
   text-align: center;
+  font-family: var(--font-display);
   font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   margin: 0 0 12px;
 }
 
 .policy-tile-img {
   width: 100px;
   height: 140px;
-  border-radius: 8px;
-  border: 3px solid #444;
+  border-radius: 4px;
+  border: 2px solid #000;
+  outline: 1px solid var(--border);
+  box-shadow: 3px 3px 0px rgba(0,0,0,0.8);
   object-fit: cover;
 }
 
@@ -159,6 +373,176 @@ img.policy-tile.policy-tile-img {
   background: none;
   cursor: pointer;
 }
+
+/* Play view (phone) safe area + styles */
+body.play-view {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+#pinBanner, #ppPin {
+  background: rgba(0,0,0,0.35);
+  border: 1px dashed var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-style: normal;
+}
+
+@keyframes hint-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201,168,76,0); }
+  50% { box-shadow: 0 0 20px 4px rgba(201,168,76,0.4); }
+}
+.flip-scene.tappable:not(.revealed) {
+  animation: hint-pulse 2s ease-in-out infinite;
+}
+
+/* Role reveal classified stamp.
+   Sits as a sibling ON TOP of .flip-scene (outside .flip-inner) so it never
+   rotates with the card — the old ::after on .flip-inner mirrored mid-flip. */
+.flip-scene { position: relative; }
+.classified-stamp {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  z-index: 10;
+  border-radius: 4px;
+  border: 1px dashed rgba(201,168,76,0.5);
+  pointer-events: none;
+  animation: classified-fade 1.5s ease-out forwards;
+}
+.flip-scene.revealed .classified-stamp { display: none; }
+@keyframes classified-fade {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
+/* Dramatic role-reveal flash: flood the screen with faction color. */
+@keyframes reveal-flash-fascist {
+  0% { box-shadow: inset 0 0 120px 40px rgba(192,57,43,0.55); }
+  100% { box-shadow: inset 0 0 0 0 transparent; }
+}
+@keyframes reveal-flash-liberal {
+  0% { box-shadow: inset 0 0 120px 40px rgba(59,111,214,0.5); }
+  100% { box-shadow: inset 0 0 0 0 transparent; }
+}
+body.reveal-fascist::after, body.reveal-liberal::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+body.reveal-fascist::after { animation: reveal-flash-fascist 0.9s ease-out; }
+body.reveal-liberal::after { animation: reveal-flash-liberal 0.9s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  body.reveal-fascist::after, body.reveal-liberal::after { animation: none; }
+  .classified-stamp { animation: none; opacity: 0.85; }
+}
+
+/* Nomination / power-target buttons: dossier rows with a stamp accent. */
+.nominateBtn, .executeBtn, .investigateBtn, .specialBtn {
+  text-align: left;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 0;
+  background: rgba(0,0,0,0.3);
+  box-shadow: 2px 2px 0px #000;
+  color: var(--text);
+  padding: 12px 12px 12px 16px;
+  margin-bottom: 10px;
+  font-family: var(--font-body);
+  font-size: 18px;
+  text-transform: none;
+  letter-spacing: 0.03em;
+}
+.nominateBtn:hover, .executeBtn:hover, .investigateBtn:hover, .specialBtn:hover {
+  border-left-color: #fff;
+  background: rgba(201,168,76,0.08);
+  filter: none;
+}
+.executeBtn { border-left-color: var(--fascist-bright); }
+.investigateBtn { border-left-color: var(--liberal); }
+
+/* Vote framing: ballot-box dossier card. */
+.vote-frame {
+  background: var(--panel);
+  border: 2px solid #000;
+  outline: 1px solid var(--border);
+  border-radius: 2px;
+  box-shadow: var(--shadow-hard);
+  padding: 20px 16px;
+  margin: 16px 0;
+}
+.vote-frame-header {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+/* Dead player stamp: a loud inked stamp, not a whisper. */
+.dead-stamp {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 36px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--fascist-bright);
+  opacity: 0.85;
+  transform: rotate(-12deg);
+  text-align: center;
+  margin: 12px 0;
+  border-top: 3px double var(--fascist-bright);
+  border-bottom: 3px double var(--fascist-bright);
+  padding: 6px 0;
+  text-shadow: 1px 1px 0px #000;
+}
+
+/* Power headers: stamped dossier banners. */
+.power-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 0;
+  border: 1px solid var(--border);
+  box-shadow: 2px 2px 0px #000;
+  margin-bottom: 16px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 15px;
+}
+.power-header.investigate { background: rgba(59,111,214,0.15); border-left: 4px solid var(--liberal); }
+.power-header.execution { background: rgba(192,57,43,0.18); border-left: 4px solid var(--fascist-bright); }
+.power-header.special { background: rgba(201,168,76,0.15); border-left: 4px solid var(--accent); }
+.power-header.peek { background: rgba(138,128,120,0.12); border-left: 4px solid var(--muted); }
+
+/* Waiting state animation */
+@keyframes waiting-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+.waiting { animation: waiting-pulse 1.5s ease-in-out infinite; }
 
 .policy-tile-img:hover { border-color: var(--accent); }
 
@@ -196,20 +580,59 @@ img.policy-tile.policy-tile-img {
 .tile-layer, .pip-layer { position: absolute; inset: 0; pointer-events: none; }
 .tile-spot { position: absolute; line-height: 0; opacity: 0; transform: scale(0.9); }
 .tile-spot.filled { opacity: 1; transform: none; }
-.tile-spot.filled img { animation: tile-in 0.3s ease-out; }
+.tile-spot.filled img { animation: tile-in 0.4s ease-out; }
 .tile-spot img { width: 100%; height: 100%; display: block; border-radius: 4px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.55); }
 @keyframes tile-in {
-  from { transform: translateY(-8px) scale(1.04); }
-  to { transform: none; }
+  from { transform: translateY(-8px) scale(1.04); opacity: 0.7; }
+  50% { box-shadow: 0 4px 20px rgba(201,168,76,0.6); }
+  to { transform: none; opacity: 1; }
+}
+
+/* Board flash on enactment */
+.board-stage.just-enacted-liberal {
+  animation: board-glow-blue 0.6s ease-out;
+}
+.board-stage.just-enacted-fascist {
+  animation: board-glow-red 0.6s ease-out;
+}
+@keyframes board-glow-blue {
+  0% { filter: drop-shadow(0 0 20px rgba(59,111,214,0.8)) drop-shadow(0 6px 14px rgba(0,0,0,0.55)); }
+  100% { filter: drop-shadow(0 6px 14px rgba(0,0,0,0.55)); }
+}
+@keyframes board-glow-red {
+  0% { filter: drop-shadow(0 0 20px rgba(163,40,47,0.8)) drop-shadow(0 6px 14px rgba(0,0,0,0.55)); }
+  100% { filter: drop-shadow(0 6px 14px rgba(0,0,0,0.55)); }
 }
 .tracker-pip {
   position: absolute;
-  width: 2.6%;
+  width: 3%;
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
   border-radius: 50%;
+  transition: background 0.3s, box-shadow 0.3s;
 }
-.tracker-pip.lit { background: #ffd75e; box-shadow: 0 0 10px 3px rgba(255, 215, 94, 0.8); }
+.tracker-pip.lit {
+  background: #ffd75e;
+  box-shadow: 0 0 10px 3px rgba(255, 215, 94, 0.8);
+}
+.tracker-pip.lit.warn {
+  background: #ff9933;
+  box-shadow: 0 0 12px 4px rgba(255, 153, 51, 0.8);
+  animation: pip-pulse-warn 1s ease-in-out infinite;
+}
+.tracker-pip.lit.danger {
+  background: var(--fascist);
+  box-shadow: 0 0 14px 5px rgba(163, 40, 47, 0.9);
+  animation: pip-pulse-danger 0.6s ease-in-out infinite;
+}
+@keyframes pip-pulse-warn {
+  0%, 100% { box-shadow: 0 0 10px 3px rgba(255, 153, 51, 0.6); }
+  50% { box-shadow: 0 0 16px 6px rgba(255, 153, 51, 1); }
+}
+@keyframes pip-pulse-danger {
+  0%, 100% { box-shadow: 0 0 12px 4px rgba(163, 40, 47, 0.7); }
+  50% { box-shadow: 0 0 20px 8px rgba(163, 40, 47, 1); }
+}
 
 .power-title {
   display: flex;
@@ -224,33 +647,65 @@ img.policy-tile.policy-tile-img {
   filter: invert(90%);
 }
 
-/* Mute toggle (board + phones) */
+/* Mute toggle (board + phones): small stamp, no hard shadow. */
 .sound-toggle {
   width: auto;
   padding: 6px 12px;
-  font-size: 14px;
-  background: var(--panel);
+  font-size: 12px;
+  background: rgba(0,0,0,0.35);
   color: var(--text);
-  border: 1px solid #444;
+  border: 1px solid var(--border);
+  box-shadow: none;
   vertical-align: middle;
+  text-transform: uppercase;
 }
 
 /* Narrator subtitle bar (board.html shared display) */
 .narr-bar {
-  background: var(--panel);
-  border: 1px solid #444;
+  background: rgba(0,0,0,0.7);
+  border: none;
   border-left: 4px solid var(--accent);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 4px;
+  padding: 12px 16px;
   margin: 8px 0 12px;
-  font-size: 18px;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 20px;
   line-height: 1.4;
+  color: #e8e4dc;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  animation: narr-fade 0.5s ease-out;
+  transition: opacity 1.2s ease;
+}
+/* Subtitles fade to a whisper after a few seconds so they stop covering the
+   table; a fresh line (or hover) brings them back. Timer lives in setSubtitle. */
+.narr-bar.faded { opacity: 0.15; }
+.narr-bar:hover { opacity: 1; }
+@keyframes narr-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.host-tools-warning {
+  border: 1px solid var(--fascist);
+  background: rgba(163, 40, 47, 0.1);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
 }
 
 @media (max-width: 700px) {
   .board-wrap { padding: 16px; }
   .policy-tile-img { width: 84px; height: 118px; }
   .role-img { max-width: 200px; }
+}
+
+@media (max-width: 900px) and (min-width: 701px) {
+  .board-wrap { padding: 20px; }
+  .seat { width: 68px; }
+  .seat-col { min-width: 68px; }
+  .board-header-controls { gap: 6px; }
+  .sound-toggle { font-size: 13px; padding: 5px 10px; }
 }
 
 /* Tabletop scene (board.html): wood table, seats around the edge,
@@ -292,6 +747,22 @@ img.policy-tile.policy-tile-img {
 .table-center .boards { margin: 8px 0; }
 .table-center .board-stage { filter: drop-shadow(0 6px 14px rgba(0,0,0,0.55)); }
 
+/* Chaos flash overlay */
+.table.chaos-flash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: radial-gradient(ellipse at center, transparent 30%, rgba(163,40,47,0.5) 100%);
+  animation: chaos-overlay 1s ease-out forwards;
+  pointer-events: none;
+  z-index: 10;
+}
+@keyframes chaos-overlay {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* Seats: SECRET card backs ringing the table. */
 .seat-row { display: flex; justify-content: center; gap: 10px; min-height: 88px; padding: 6px 4px; flex-wrap: wrap; }
 .seat-col { display: flex; flex-direction: column; justify-content: center; gap: 10px; min-width: 76px; padding: 6px 0; }
@@ -303,22 +774,61 @@ img.policy-tile.policy-tile-img {
   border-radius: 8px;
   transition: transform 0.25s ease;
 }
+.seat-row.no-seat-transition .seat,
+.seat-col.no-seat-transition .seat { transition: none; }
 .seat img.seat-card { width: 100%; height: auto; display: block; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.12); }
-.seat .seat-name { display: block; margin-top: 4px; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.seat .seat-badge { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 800; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.seat .seat-name {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'EB Garamond', serif;
+  letter-spacing: 0.03em;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(0,0,0,0.5);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.seat .seat-badge {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  font-family: var(--font-display);
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
 .seat.president { transform: translateY(-2px); }
-.seat.president img.seat-card { border-color: var(--accent); box-shadow: 0 0 12px rgba(214,177,59,0.8); }
+.seat.president img.seat-card { border-color: var(--accent); box-shadow: 0 0 12px rgba(201,168,76,0.8); }
 .seat.president .seat-badge { background: var(--accent); color: #1b1d22; }
 .seat.chancellor img.seat-card { border-color: #6fd68b; box-shadow: 0 0 12px rgba(111,214,139,0.8); }
 .seat.chancellor .seat-badge { background: #6fd68b; color: #10241a; }
 .seat.candidate img.seat-card { border-color: #6fd68b; border-style: dashed; }
 .seat.candidate .seat-badge { background: transparent; color: #6fd68b; border: 1px dashed #6fd68b; }
-.seat.dead { opacity: 0.45; filter: grayscale(0.7); }
+.seat.dead {
+  opacity: 0.45;
+  filter: grayscale(0.7);
+  animation: death-fade 0.5s ease-out;
+}
 .seat.dead .seat-name { text-decoration: line-through; }
-.seat .vote-dot { position: absolute; bottom: 20px; right: -4px; width: 22px; height: 22px; border-radius: 50%; background: #222; border: 2px solid #fff; display: none; }
-.seat.voted .vote-dot { display: block; background: #4a9e5c; animation: seat-pop 0.3s ease-out; }
+@keyframes death-fade {
+  0% { opacity: 1; filter: grayscale(0) brightness(1.5); }
+  30% { filter: grayscale(0) brightness(2) drop-shadow(0 0 8px rgba(163,40,47,0.8)); }
+  100% { opacity: 0.45; filter: grayscale(0.7) brightness(1); }
+}
+.seat .vote-dot { position: absolute; bottom: 20px; right: -4px; width: 24px; height: 24px; border-radius: 50%; background: #222; border: 2px solid #fff; display: none; box-shadow: 0 2px 6px rgba(0,0,0,0.5); }
+.seat.voted .vote-dot { display: block; background: #4a9e5c; animation: seat-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .seat.voted-nein .vote-dot { background: var(--fascist); }
-@keyframes seat-pop { from { transform: scale(0.4); } to { transform: none; } }
+@keyframes seat-pop { from { transform: scale(0); } to { transform: scale(1); } }
 
 /* Policy well: fanned face-down tiles overlapping the board gap. */
 .policy-well { position: relative; z-index: 2; margin: -34px auto -30px; text-align: center; line-height: 1.2; pointer-events: none; }
@@ -332,7 +842,7 @@ img.policy-tile.policy-tile-img {
   border-radius: 5px;
   box-shadow: 0 6px 14px rgba(0,0,0,0.65);
   border: 2px solid rgba(255,255,255,0.15);
-  animation: fan-in 0.35s ease-out;
+  animation: fan-in 0.35s ease-out both;
 }
 .policy-fan img:nth-child(1) { transform: translateX(-110%) rotate(-14deg); }
 .policy-fan img:nth-child(2) { transform: translateX(-75%) rotate(-7deg); }
@@ -340,20 +850,20 @@ img.policy-tile.policy-tile-img {
 .policy-fan img:nth-child(4) { transform: translateX(-25%) rotate(7deg); }
 .policy-fan img:nth-child(5) { transform: translateX(-10%) rotate(14deg); }
 @keyframes fan-in { from { transform: translateX(-50%) translateY(-10px) scale(1.05); opacity: 0.4; } }
-.policy-well-label { display: inline-block; background: rgba(0,0,0,0.65); padding: 3px 12px; border-radius: 12px; }
+.policy-well-label { display: inline-block; background: rgba(0,0,0,0.65); padding: 3px 12px; border-radius: 12px; font-size: 16px; }
 
 /* Pile badges on the board corners. */
 .pile-badge {
   position: absolute;
   top: 8px;
-  min-width: 30px;
-  height: 30px;
+  min-width: 36px;
+  height: 36px;
   padding: 0 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 15px;
-  font-size: 14px;
+  border-radius: 18px;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1;
   background: rgba(0,0,0,0.72);
@@ -406,4 +916,119 @@ div.policy-tile .flip-face { width: 100%; height: 100%; }
 
 @media (max-width: 700px) {
   div.policy-tile.flip-scene { width: 84px; height: 118px; }
+}
+
+/* Host fit-to-screen (board.html, wide screens only): the whole game must fit
+   in one viewport height with no scrolling on the shared display. No height
+   breakpoint — the layout scales continuously (vmin seats, dvh-capped boards,
+   measured JS guard below), so there is no threshold to fall off. Narrow
+   windows and phones keep the natural scrolling layout above. */
+@media (min-width: 1100px) {
+  body .board-wrap {
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-width: none;
+    padding: 10px 24px;
+  }
+
+  /* Header compresses once the game starts (body.in-game is toggled by render()). */
+  body.in-game .board-header { margin-bottom: 6px; }
+  body.in-game .board-header-top h1 { font-size: 22px; margin: 0 0 4px; }
+  body.in-game .logo-small { display: none; }
+
+  #gamePanel { margin: 0; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  #gamePanel::before { display: none; }
+
+  .table {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 6px 0;
+    padding: 8px 14px;
+    transform-origin: top center;
+  }
+  .table-middle { min-height: 0; }
+  /* Boards narrow on short windows via width (tile/pip % overlays stay
+     aligned); at 1080p+ this is still the full width below. */
+  .table-center { max-width: 700px; max-width: min(700px, 110vh); max-width: min(700px, 110dvh); }
+  .table-center .boards { margin: 2px 0; gap: 6px; }
+
+  /* Seats shrink with the viewport instead of costing a fixed ~240px. */
+  .seat-row { min-height: 0; padding: 2px 4px; gap: 8px; }
+  .seat-col { gap: 8px; min-width: 0; padding: 4px 0; }
+  .seat { width: clamp(52px, 7vmin, 64px); }
+
+  /* Policy well slims down to match. */
+  .policy-well { margin: -18px auto -16px; }
+  .policy-fan { height: 64px; }
+  .policy-fan img { width: 44px; }
+
+  /* In-flow extras become overlays so they never cost layout height. */
+  #narrBar {
+    position: fixed;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    max-width: min(720px, 90vw);
+    margin: 0;
+    z-index: 60;
+    font-size: 18px;
+  }
+  #hostTools {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    max-width: 320px;
+    margin: 0;
+    z-index: 61;
+    background: rgba(22, 24, 28, 0.95);
+  }
+  /* In-game the host tools are a transient skip button, not a panel: strip
+     the heading and help text so they cover as little of the table as possible. */
+  body.in-game #hostTools { padding: 10px; }
+  body.in-game #hostTools h3,
+  body.in-game #hostTools p.muted { display: none; }
+  #gameOverBanner {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    height: fit-content;
+    max-width: 640px;
+    z-index: 70;
+    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* DEV-ONLY sidebar: the solo-testing panel docks to the right edge with its
+   own scroll, so it never costs the board page any vertical space while
+   checking the fit-to-screen layout. Delete with dev-bots.js before game night. */
+@media (min-width: 900px) {
+  body.dev #devPanel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 280px;
+    margin: 0;
+    padding: 12px;
+    overflow-y: auto;
+    z-index: 80;
+    background: rgba(22, 24, 28, 0.97);
+    border-left: 2px solid var(--accent);
+    border-radius: 0;
+  }
+  body.dev #devPanel::before { display: none; }
+  body.dev #devPanel button {
+    padding: 8px 10px;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  body.dev .board-wrap { padding-right: 296px; }
+  body.dev #hostTools { right: 292px; }
+  /* DEV-ONLY hide: true game look (H key or Hide button). */
+  body.dev-tools-hidden #devPanel { display: none !important; }
+  body.dev-tools-hidden .board-wrap { padding-right: 24px; }
+  body.dev-tools-hidden #hostTools { right: 12px; }
 }

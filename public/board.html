@@ -3,14 +3,27 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#1a1816" />
 <title>Secret Hitler — Board</title>
 <link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=Special+Elite&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,700;6..96,900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <div class="board-wrap">
-    <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room <span id="roomCode"></span></span> <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button> <button id="narratorBtn" class="sound-toggle" type="button">🎙️ Narrator on</button></h1>
-    <p class="muted">Phase: <span id="phaseLabel"></span></p>
+    <div class="board-header">
+      <div class="board-header-top">
+        <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room <span id="roomCode"></span></span></h1>
+      </div>
+      <div class="board-header-controls">
+        <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+        <button id="narratorBtn" class="sound-toggle" type="button">🎙️ Narrator on</button>
+        <button id="fullscreenBtn" class="sound-toggle" type="button">⛶ Fullscreen</button>
+      </div>
+    </div>
+    <p class="muted"><span class="phase-badge" id="phaseLabel"></span></p>
     <div id="narrBar" class="narr-bar" style="display:none"><span id="narrText"></span></div>
 
     <div id="gameOverBanner" class="role-banner" style="display:none"></div>
@@ -19,6 +32,9 @@
       <div class="qr-box">
         <div id="qrBox" aria-label="QR code to join"></div>
         <p class="muted" id="joinUrl"></p>
+        <p class="muted">Phones on wifi? If the QR won't load on phones, type this device's network address here and re-scan:
+          <input id="phoneHost" inputmode="url" autocomplete="off" spellcheck="false" placeholder="e.g. 192.168.0.77:8080" />
+        </p>
       </div>
       <p><strong id="playerCount">0</strong> players joined: <span id="playerNames"></span></p>
       <p class="muted">Need 5–10 players.</p>
@@ -55,11 +71,12 @@
         <div class="seat-row seat-bottom" id="seatBottom" aria-label="Bottom seats"></div>
       </div>
 
-      <h3>Players</h3>
+      <h3 style="display:none">Players</h3>
       <div class="player-list" id="playerChips" style="display:none"></div>
 
-      <div id="hostTools" style="display:none">
+      <div id="hostTools" class="host-tools-warning" style="display:none">
         <h3>Host tools</h3>
+        <button id="nightSkipBtn" style="display:none">Begin game now</button>
         <button id="forceResolveBtn">Force-resolve election (missing votes count as Nein)</button>
         <p class="muted">Only for a stuck vote — resolves immediately with the ballots cast so far.</p>
       </div>
@@ -67,7 +84,7 @@
 
     <!-- DEV-ONLY START: solo-testing shortcuts. Delete this block before game night. -->
     <section id="devPanel" style="display:none">
-      <h3>DEV shortcuts (testing only)</h3>
+      <h3>DEV shortcuts (testing only) <button id="devHideBtn" type="button" style="width:auto;padding:4px 10px;font-size:12px">Hide (H)</button></h3>
       <button id="devFill5">Fill bots to 5</button>
       <button id="devFill7">Fill bots to 7</button>
       <button id="devRemoveBots">Remove bots</button>

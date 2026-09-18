@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<!-- DEV-ONLY play preview — DELETE before game night.
+     Static mock of play.html (the phone player view) with no Firebase:
+     pick a screen + a device width to feel how each phone screen looks.
+     Markup mirrors the render*() functions in js/play.js (marked MIRROR);
+     styling is the real css/style.css, so what you see is honest.
+     Interactive bits (flips, buttons) are visual-only demos. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>Secret Hitler — Play Preview (dev only)</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  /* Preview rail: fixed left, stage shifts right so nothing is covered. */
+  #previewRail {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 264px;
+    overflow-y: auto; z-index: 80; background: rgba(22,24,28,.97);
+    border-right: 2px solid var(--accent); padding: 12px; margin: 0;
+  }
+  #previewRail h3 { margin: 6px 0 8px; font-size: 15px; }
+  #previewRail .row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  #previewRail .row button { padding: 8px 6px; font-size: 13px; margin: 0; width: auto; flex: 1 1 auto; }
+  #previewRail .row button.active { outline: 2px solid #fff; }
+  #previewRail label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 2px; }
+  #previewReadout {
+    font-family: monospace; font-size: 12px; background: #111;
+    border-radius: 6px; padding: 8px; margin-top: 10px; white-space: pre-wrap;
+  }
+  /* Device frame: constrains the mock to a phone/tablet width. */
+  #stage { padding: 16px; }
+  #deviceFrame {
+    margin: 0 auto;
+    border: 2px solid #444;
+    border-radius: 24px;
+    overflow: hidden;
+    /* No transition: the readout measures the frame synchronously, and a
+       transitioning max-width would leave it reporting a stale width. */
+    background: var(--bg);
+  }
+  #deviceFrame .notch {
+    text-align: center; font-size: 11px; color: var(--muted);
+    padding: 4px 0 0; letter-spacing: 0.1em;
+  }
+  @media (min-width: 900px) {
+    body.pp-preview #stage { padding-left: 280px; }
+  }
+  /* Small windows: full-bleed frame so Phone 390 previews measure exactly 390. */
+  @media (max-width: 500px) {
+    #stage { padding: 0; }
+    #deviceFrame { border-radius: 0; border-left: none; border-right: none; }
+    #deviceFrame .notch { display: none; }
+  }
+  body.pp-preview.tools-hidden #previewRail { display: none; }
+  /* Scoped above 500px: below that the full-bleed rule below must win (this
+     selector is more specific than the bare #stage rule, so it can't apply
+     down there or it would re-add a 16px gutter on one side). */
+  @media (min-width: 501px) {
+    body.pp-preview.tools-hidden #stage { padding-left: 16px; }
+  }
+</style>
+</head>
+<body class="play-view pp-preview">
+  <aside id="previewRail">
+    <h3>Play preview (dev only)</h3>
+    <label>Device width</label>
+    <div class="row" id="widthRow">
+      <button data-w="390" class="active">Phone 390</button>
+      <button data-w="768">Tablet 768</button>
+      <button data-w="full">Full</button>
+    </div>
+    <label>Screen</label>
+    <div class="row" id="screenRow" style="flex-direction:column">
+      <button data-s="join">join</button>
+      <button data-s="waiting">waiting for host</button>
+      <button data-s="reveal" class="active">night reveal (tap card)</button>
+      <button data-s="idle">idle role + team</button>
+      <button data-s="nomination">nomination (president)</button>
+      <button data-s="vote">election vote</button>
+      <button data-s="pres">legislation president</button>
+      <button data-s="chan">legislation chancellor</button>
+      <button data-s="veto">veto consent (president)</button>
+      <button data-s="peek">power: policy peek</button>
+      <button data-s="investigate">power: investigate</button>
+      <button data-s="special">power: special election</button>
+      <button data-s="execution">power: execution</button>
+      <button data-s="dead">executed</button>
+      <button data-s="gameover">game over</button>
+    </div>
+    <label>Role (reveal / idle screens)</label>
+    <div class="row" id="roleRow">
+      <button data-r="liberal">Liberal</button>
+      <button data-r="fascist" class="active">Fascist</button>
+      <button data-r="hitler">Hitler</button>
+    </div>
+    <div class="row">
+      <button id="toolsToggle">hide tools (H)</button>
+    </div>
+    <div id="previewReadout">…</div>
+    <p class="muted">Note: the frame simulates width only — media queries follow the real window, so also resize the window / use devtools device toolbar for a true check.</p>
+  </aside>
+
+  <div id="stage">
+    <div id="deviceFrame" style="max-width:390px">
+      <div class="notch">PREVIEW</div>
+      <!-- MIRROR of play.html body (same structure, static demo content). -->
+      <div class="board-wrap" style="max-width:480px">
+        <p class="muted" id="ppStatus"></p>
+        <button id="ppSoundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+        <p class="muted" id="ppPin" style="display:none"></p>
+        <div id="ppMain"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// MIRROR of play.js render paths (static demo data, no Firebase).
+var NAMES = ['Anja', 'Boris', 'Clara', 'Dmitri', 'Elsa', 'Fritz', 'Greta'];
+var ROLES = {
+  liberal: { img: 'role-liberal', label: 'Liberal', team: '' },
+  fascist: { img: 'role-fascist', label: 'Fascist', team: 'Your team: Boris, Clara' },
+  hitler: { img: 'role-hitler', label: 'Hitler', team: 'Your team: Boris' }
+};
+var screen = 'reveal';
+var role = 'fascist';
+
+function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+// MIRROR of policyFlipTile(t, i) in play.js — starts facedown.
+function flipTile(t, i) {
+  return '<div class="policy-tile flip-scene tappable" data-idx="' + i + '" data-demo="tile">' +
+    '<div class="flip-inner flipped">' +
+    '<img class="policy-tile-img flip-face" src="img/tile-' + t + '.png" alt="' + t + ' policy" />' +
+    '<img class="policy-tile-img flip-face flip-back" src="img/back-tile.png" alt="Facedown policy — tap to peek" />' +
+    '</div></div>';
+}
+function plainTile(t) {
+  return '<img class="policy-tile policy-tile-img" src="img/tile-' + t + '.png" alt="' + t + ' policy" />';
+}
+
+function roleScene(r) {
+  return '<div class="flip-scene center tappable" id="demoRoleScene">' +
+    '<div class="flip-inner flipped" id="demoRoleFlip">' +
+    '<img class="role-img flip-face" src="img/' + ROLES[r].img + '.png" alt="' + ROLES[r].label + '" />' +
+    '<img class="role-img flip-face flip-back" src="img/back-role.png" alt="Your secret role — tap to reveal" />' +
+    '</div>' +
+    '<div class="classified-stamp" aria-hidden="true">CLASSIFIED</div></div>';
+}
+
+var SCREENS = {
+  join: { status: 'Waiting for host to start...', pin: false, html:
+    '<p>Room ABCDE — enter your name to take a seat.</p>' +
+    '<input type="text" value="Greta" maxlength="20" />' +
+    '<button type="button">Join game</button>' +
+    '<p class="muted">Phones join by scanning the board QR code.</p>' },
+  waiting: { status: 'Waiting for host to start...', pin: true, html:
+    '<p class="muted waiting">Waiting for the host to start the game...</p>' },
+  reveal: { status: 'Phase: night', pin: true, html: function () {
+    return roleScene(role) +
+      '<p class="role-caption">Tap to reveal your role — shield your screen</p>' +
+      '<p>Night falls — reveal your role, then hide it again.</p>';
+  } },
+  idle: { status: 'Phase: nomination', pin: true, html: function () {
+    var team = ROLES[role].team ? '<p class="muted">' + esc(ROLES[role].team) + '</p>' : '';
+    return '<img class="role-img" src="img/' + ROLES[role].img + '.png" alt="' + ROLES[role].label + '" />' +
+      '<p class="role-caption">' + ROLES[role].label + '</p>' + team +
+      '<p>Anja is nominating a Chancellor.</p>' +
+      '<button type="button" id="demoHideBtn">Hide role</button>';
+  } },
+  nomination: { status: 'Phase: nomination', pin: true, html:
+    '<h2>Nominate a Chancellor</h2>' +
+    ['Boris', 'Clara', 'Dmitri', 'Elsa', 'Fritz'].map(function (n) {
+      return '<button type="button" class="nominateBtn">' + esc(n) + '</button>';
+    }).join('') },
+  vote: { status: 'Phase: election', pin: false, html:
+    '<h2>Anja nominates Boris</h2>' +
+    '<div class="vote-frame"><div class="vote-frame-header">Cast Your Vote</div>' +
+    '<div class="vote-buttons">' +
+    '<button class="ballot ja" id="demoJa"><div class="flip-scene"><div class="flip-inner" id="demoJaFlip">' +
+    '<img src="img/ballot-ja.png" alt="Ja!" class="flip-face" />' +
+    '<img src="img/back-ballot.png" alt="" class="flip-face flip-back" />' +
+    '</div></div></button>' +
+    '<button class="ballot nein" id="demoNein"><div class="flip-scene"><div class="flip-inner" id="demoNeinFlip">' +
+    '<img src="img/ballot-nein.png" alt="Nein!" class="flip-face" />' +
+    '<img src="img/back-ballot.png" alt="" class="flip-face flip-back" />' +
+    '</div></div></button>' +
+    '</div></div>' },
+  pres: { status: 'Phase: legislative_president', pin: false, html:
+    '<h2>Discard one policy</h2>' +
+    '<p class="muted">Tap a card to peek, tap again to discard it. The remaining two go to the Chancellor.</p>' +
+    '<div class="policy-choice">' + flipTile('fascist', 0) + flipTile('liberal', 1) + flipTile('fascist', 2) + '</div>' },
+  chan: { status: 'Phase: legislative_chancellor', pin: false, html:
+    '<h2>Enact one policy</h2>' +
+    '<p class="muted">Tap a card to peek, tap again to enact it. The other is discarded, unseen.</p>' +
+    '<div class="policy-choice">' + flipTile('liberal', 0) + flipTile('fascist', 1) + '</div>' +
+    '<button type="button">I wish to veto this agenda</button>' },
+  veto: { status: 'Phase: legislative_chancellor', pin: false, html:
+    '<h2>Chancellor wishes to veto</h2>' +
+    '<p class="muted">Agree to discard both policies (tracker +1), or refuse and they must enact one.</p>' +
+    '<div class="policy-choice">' + plainTile('liberal') + plainTile('fascist') + '</div>' +
+    '<div class="vote-buttons"><button type="button">I agree to the veto</button>' +
+    '<button type="button" id="vetoRefuseBtn">Refuse — enact a policy</button></div>' },
+  peek: { status: 'Phase: executive_action', pin: false, html:
+    '<div class="power-header peek"><img class="power-icon" src="img/icon-peek.png" alt="" /><span>Policy Peek</span></div>' +
+    '<p class="muted">Top 3 deck tiles (only you see this). Tap each card to peek, then Done.</p>' +
+    '<div class="policy-choice">' + flipTile('fascist', 0) + flipTile('fascist', 1) + flipTile('liberal', 2) + '</div>' +
+    '<button type="button">Done</button>' },
+  investigate: { status: 'Phase: executive_action', pin: false, html:
+    '<div class="power-header investigate"><img class="power-icon" src="img/icon-investigate.png" alt="" /><span>Investigate Loyalty</span></div>' +
+    '<p class="muted">Pick a player to learn whether they are Liberal or Fascist.</p>' +
+    '<div id="demoInvestOpts">' + ['Boris', 'Clara', 'Dmitri'].map(function (n) {
+      return '<button type="button" class="investigateBtn" data-n="' + n + '">' + esc(n) + '</button>';
+    }).join('') + '</div><div id="demoInvestResult"></div>' },
+  special: { status: 'Phase: executive_action', pin: false, html:
+    '<div class="power-header special"><img class="power-icon" src="img/icon-special-election.png" alt="" /><span>Special Election</span></div>' +
+    '<p class="muted">Choose any other living player to be President next.</p>' +
+    ['Boris', 'Clara', 'Dmitri', 'Elsa'].map(function (n) {
+      return '<button type="button" class="specialBtn">' + esc(n) + '</button>';
+    }).join('') },
+  execution: { status: 'Phase: executive_action', pin: false, html:
+    '<div class="power-header execution"><img class="power-icon" src="img/icon-execution.png" alt="" /><span>Choose a player to execute</span></div>' +
+    ['Boris', 'Clara', 'Dmitri', 'Elsa'].map(function (n) {
+      return '<button type="button" class="executeBtn">' + esc(n) + '</button>';
+    }).join('') },
+  dead: { status: 'Phase: nomination', pin: false, html:
+    '<div class="role-banner dead">You have been executed.</div>' +
+    '<div class="dead-stamp">EXECUTED</div>' +
+    '<p class="muted">You are out of the game — sit back and watch. Boris is nominating a Chancellor.</p>' },
+  gameover: { status: 'Phase: gameover', pin: false, html:
+    '<div class="role-banner liberal">Liberals win!</div>' }
+};
+
+function render() {
+  var def = SCREENS[screen];
+  document.getElementById('ppStatus').textContent = def.status;
+  var pin = document.getElementById('ppPin');
+  if (def.pin) {
+    pin.style.display = 'block';
+    pin.textContent = 'Your reconnect code: 4821 — save it in case you need to rejoin from another device.';
+  } else { pin.style.display = 'none'; }
+  document.getElementById('ppMain').innerHTML = typeof def.html === 'function' ? def.html() : def.html;
+  bindDemo();
+  readout();
+}
+
+// Visual-only demo wiring (no Firebase): taps flip cards / record demo votes.
+function bindDemo() {
+  var main = document.getElementById('ppMain');
+  var rs = document.getElementById('demoRoleScene');
+  if (rs) rs.addEventListener('click', function () {
+    rs.classList.add('revealed');
+    document.getElementById('demoRoleFlip').classList.remove('flipped');
+    try {
+      var cls = role === 'liberal' ? 'reveal-liberal' : 'reveal-fascist';
+      document.body.classList.remove('reveal-liberal', 'reveal-fascist');
+      void document.body.offsetWidth;
+      document.body.classList.add(cls);
+      setTimeout(function () { document.body.classList.remove(cls); }, 950);
+    } catch (_) {}
+  });
+  main.querySelectorAll('[data-demo="tile"] .flip-inner.flipped').forEach(function (inner) {
+    inner.parentElement.addEventListener('click', function () { inner.classList.remove('flipped'); });
+  });
+  var ja = document.getElementById('demoJa'), nein = document.getElementById('demoNein');
+  if (ja && nein) {
+    ja.addEventListener('click', function () {
+      document.getElementById('demoJaFlip').classList.add('flipped');
+      nein.setAttribute('disabled', '');
+    });
+    nein.addEventListener('click', function () {
+      document.getElementById('demoNeinFlip').classList.add('flipped');
+      ja.setAttribute('disabled', '');
+    });
+  }
+  var opts = document.getElementById('demoInvestOpts');
+  if (opts) opts.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    opts.innerHTML = '<p class="muted">Investigating ' + esc(b.dataset.n) + '...</p>';
+    document.getElementById('demoInvestResult').innerHTML =
+      '<div class="flip-scene center"><div class="flip-inner">' +
+      '<img class="role-img flip-face" src="img/role-fascist.png" alt="fascist" />' +
+      '<img class="role-img flip-face flip-back" src="img/back-role.png" alt="" />' +
+      '</div></div>';
+  });
+}
+
+function readout() {
+  var frame = document.getElementById('deviceFrame');
+  var fw = Math.round(frame.getBoundingClientRect().width);
+  var over = document.documentElement.scrollWidth > window.innerWidth + 1;
+  document.getElementById('previewReadout').textContent =
+    'screen ' + screen + ' · role ' + role + '\n' +
+    'frame ' + fw + 'px · viewport ' + window.innerWidth + 'x' + window.innerHeight + '\n' +
+    (over ? 'H-OVERFLOW: page scrolls sideways!' : 'no page-level h-overflow');
+}
+
+document.getElementById('screenRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  screen = b.dataset.s;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  render();
+});
+document.getElementById('roleRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  role = b.dataset.r;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  render();
+});
+document.getElementById('widthRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  document.getElementById('deviceFrame').style.maxWidth = b.dataset.w === 'full' ? 'none' : b.dataset.w + 'px';
+  readout();
+});
+function setToolsHidden(hidden) {
+  document.body.classList.toggle('tools-hidden', hidden);
+  document.getElementById('toolsToggle').textContent = hidden ? 'show tools (H)' : 'hide tools (H)';
+  readout();
+}
+document.getElementById('toolsToggle').addEventListener('click', function () {
+  setToolsHidden(!document.body.classList.contains('tools-hidden'));
+});
+window.addEventListener('keydown', function (e) {
+  if ((e.key === 'h' || e.key === 'H') && !/INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) {
+    setToolsHidden(!document.body.classList.contains('tools-hidden'));
+  }
+});
+window.addEventListener('resize', readout);
+
+// URL params for sharing (DEV-ONLY): ?screen=vote&width=390&role=fascist&tools=hidden
+(function applyParams() {
+  var q = new URLSearchParams(location.search);
+  var s = q.get('screen');
+  if (s && SCREENS[s]) {
+    screen = s;
+    document.querySelectorAll('#screenRow button').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.s === s);
+    });
+  }
+  var r = q.get('role');
+  if (r && ROLES[r]) {
+    role = r;
+    document.querySelectorAll('#roleRow button').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.r === r);
+    });
+  }
+  if (q.get('tools') === 'hidden') setToolsHidden(true);
+  var w = q.get('width');
+  if (w === '390' || w === '768' || w === 'full') {
+    document.querySelectorAll('#widthRow button').forEach(function (x) {
+      var on = x.dataset.w === w;
+      x.classList.toggle('active', on);
+      if (on) x.click();
+    });
+  }
+})();
+render();
+</script>
+</body>
+</html>

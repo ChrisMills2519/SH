@@ -3,14 +3,27 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#1a1816" />
 <title>Secret Hitler — Play</title>
 <link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=Special+Elite&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,700;6..96,900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css" />
 </head>
-<body>
+<body class="play-view">
   <div class="board-wrap" style="max-width:480px">
     <p class="muted" id="status"></p>
     <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+    <p class="muted" id="pinBanner" style="display:none"></p>
+    <div id="reconnectBox" style="display:none">
+      <h2>Reconnect to an existing seat</h2>
+      <p class="muted">Enter the name and 4-digit reconnect code from your original device. The board will move your seat over.</p>
+      <input id="reconnectName" type="text" placeholder="Your name" maxlength="20" inputmode="text" />
+      <input id="reconnectPin" type="text" placeholder="Code" maxlength="4" inputmode="numeric" />
+      <button id="reconnectBtn">Reconnect</button>
+      <p id="reconnectStatus" class="muted"></p>
+    </div>
     <div id="main"></div>
   </div>
   <script type="module" src="js/play.js"></script>
