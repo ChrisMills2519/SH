@@ -1712,3 +1712,42 @@ body.exec-witness::after {
   .exec-scare { display: none !important; }
 }
 .seat.exec-dead .seat-name { text-decoration: line-through; color: #ff9a8a; }
+
+/* Animated board tutorial (sandbox ?tutorial=1): director card + mock phone
+   + spotlight focus ring on the real board. Vanilla CSS only. */
+#tutDirector { position: fixed; inset: auto 0 0 0; z-index: 80; display: flex;
+  gap: 12px; justify-content: center; align-items: flex-end; padding: 12px 16px 16px;
+  pointer-events: none; }
+#tutDirector .tut-card { pointer-events: auto; max-width: 620px; width: min(620px, 94vw);
+  background: var(--tex-panel-grain), var(--tex-scan), var(--panel);
+  border: 2px solid #000; outline: 1px solid var(--accent);
+  box-shadow: var(--shadow-hard); padding: 14px 18px; text-align: center; }
+#tutDirector .tut-card h2 { border: none; margin: 0 0 6px; padding: 0; font-size: 21px; }
+#tutDirector .tut-card p { font-size: 15px; margin: 0 0 6px; }
+#tutDirector .tutorial-steps { display: flex; gap: 6px; justify-content: center; margin: 8px 0; }
+#tutDirector .tutorial-steps span { width: 22px; height: 6px; border-radius: 3px; background: #444; }
+#tutDirector .tutorial-steps span.on { background: var(--accent); }
+#tutDirector .tutorial-nav { display: flex; gap: 10px; margin-top: 8px; }
+#tutDirector .tutorial-nav button { width: auto; flex: 1; }
+#tutDirector .tut-exit-row { margin-top: 8px; font-size: 13px; }
+.tut-phone { pointer-events: auto; width: 220px; flex: none;
+  background: #141210; border: 2px solid #000; outline: 1px solid var(--border);
+  border-radius: 14px; padding: 10px; text-align: center;
+  box-shadow: var(--shadow-hard); max-height: 46vh; overflow-y: auto; }
+.tut-phone-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+.tut-phone-screen img { max-width: 64px; height: auto; border-radius: 4px; border: 1px solid #000; }
+.tut-phone-screen p { font-size: 13px; color: var(--text); margin: 8px 0 0; }
+.tut-phone-row { display: flex; gap: 6px; justify-content: center; }
+.tut-phone-row img { width: 56px; }
+.tut-phone-screen .tut-icon { width: 34px; vertical-align: middle; }
+#table.tut-demo .tut-focus { outline: 3px solid var(--accent); outline-offset: 4px;
+  border-radius: 8px; animation: tut-focus-pulse 1.6s ease-in-out infinite; }
+@keyframes tut-focus-pulse { 0%, 100% { outline-color: var(--accent); } 50% { outline-color: #fff2c0; } }
+@media (max-width: 760px) {
+  #tutDirector { flex-direction: column; align-items: center; }
+  .tut-phone { width: min(320px, 92vw); max-height: 30vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #table.tut-demo .tut-focus { animation: none !important; }
+}

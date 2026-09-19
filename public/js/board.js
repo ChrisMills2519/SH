@@ -12,6 +12,9 @@ import { initNarratorToggle, narrate, narrateOnce, narrateDelayed, cancelNarrato
 const params = new URLSearchParams(location.search);
 const room = params.get('room');
 const isNew = params.get('new') === '1';
+// Sandbox tutorial: ?tutorial=1 runs a scripted walkthrough on the real board
+// DOM with mock state — zero Firebase game writes, zero live subscriptions.
+const isTutorialSandbox = params.get('tutorial') === '1';
 const gameRef = ref(db, `games/${room}`);
 const metaRef = ref(db, `games/${room}/meta`);
 
@@ -48,6 +51,11 @@ async function main() {
         document.exitFullscreen().catch(() => {});
       }
     });
+  }
+
+  if (isTutorialSandbox) {
+    initTutorialSandbox();
+    return;
   }
 
   if (isNew) {
@@ -843,43 +851,197 @@ const TUTORIAL_STEPS = [
 let tutorialIdx = 0;
 
 function openTutorial() {
-  const phase = currentMeta.phase;
-  closeTutorial();
-  if (phase && phase !== 'lobby' && phase !== 'gameover') {
-    alert('Tutorial runs before the game starts (lobby) so it can\u2019t cover a live round.');
-    return;
+  // Animated walkthrough runs in an isolated sandbox tab on the real board —
+  // never over a live game, so demo cinematics can't stomp real state.
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('room', 'TUTORIAL');
+    url.searchParams.set('tutorial', '1');
+    window.open(url.toString(), '_blank', 'noopener');
+  } catch (_) {
+    alert('Could not open the tutorial sandbox.');
   }
-  // Appended to <body>, not #table: the table lives inside #gamePanel,
-  // which render() hides in the lobby — the overlay would be invisible.
-  const overlay = document.createElement('div');
-  overlay.className = 'tutorial-overlay';
-  overlay.id = 'tutorialOverlay';
-  overlay.setAttribute('role', 'dialog');
-  overlay.setAttribute('aria-label', 'Board tutorial');
-  overlay.innerHTML = `
-    <div class="tutorial-card">
-      <h2 id="tutTitle"></h2>
-      <p class="muted" id="tutBody" style="font-size:16px"></p>
-      <div class="tutorial-steps" id="tutDots" aria-hidden="true"></div>
-      <div class="tutorial-nav">
-        <button id="tutBack" class="secondary" type="button">← Back</button>
-        <button id="tutNext" type="button">Next →</button>
-      </div>
-      <p class="muted" style="margin-top:10px"><button id="tutClose" class="linklike" type="button">Skip tutorial ✕</button> · Esc closes</p>
-    </div>`;
-  document.body.appendChild(overlay);
-  el('tutBack').addEventListener('click', () => showTutorialStep(tutorialIdx - 1));
-  el('tutNext').addEventListener('click', () => showTutorialStep(tutorialIdx + 1));
-  el('tutClose').addEventListener('click', closeTutorial);
-  overlay.addEventListener('click', e => { if (e.target === overlay) closeTutorial(); });
-  const onKey = e => {
-    if (e.key === 'Escape') { closeTutorial(); document.removeEventListener('keydown', onKey); }
-    if (e.key === 'ArrowRight') showTutorialStep(tutorialIdx + 1);
-    if (e.key === 'ArrowLeft') showTutorialStep(tutorialIdx - 1);
+}
+
+// ---------------------------------------------------------------------------
+// Tutorial sandbox (?tutorial=1): scripted full-round walkthrough on the real
+// board DOM with mock state. No Firebase game reads/writes; all painters and
+// cinematics run against demo globals. Vanilla CSS/JS only.
+// ---------------------------------------------------------------------------
+const TUT_NAMES = ['Ava', 'Ben', 'Cara', 'Dev', 'Eli', 'Fay', 'Gus'];
+const TUT_UIDS = TUT_NAMES.map(n => `tut-${n.toLowerCase()}`);
+let tutExecUid = null;
+
+function tutBaseMeta() {
+  return {
+    phase: 'nomination',
+    roundId: 1,
+    playerOrder: [...TUT_UIDS],
+    presidentUid: TUT_UIDS[0],
+    chancellorUid: null,
+    chancellorCandidateUid: null,
+    electionTracker: 0,
+    liberalTrack: 0,
+    fascistTrack: 0,
+    vetoUnlocked: false,
+    hostUid: null,
+    winner: null,
+    winReason: null,
   };
-  document.addEventListener('keydown', onKey);
-  tutorialIdx = 0;
-  showTutorialStep(0);
+}
+
+function tutBasePlayers() {
+  const out = {};
+  TUT_NAMES.forEach((n, i) => {
+    out[TUT_UIDS[i]] = { name: n, alive: true, connected: true, joinedAt: i };
+  });
+  return out;
+}
+
+function initTutorialSandbox() {
+  currentMeta = tutBaseMeta();
+  currentPlayers = tutBasePlayers();
+  deckCount = 17;
+  discardCount = 0;
+  votesCastMap = {};
+  votesMap = {};
+  votesRevealedFlag = false;
+  execState = null;
+  tutExecUid = null;
+  try { document.body.classList.add('in-game'); } catch (_) {}
+  const lobby = el('lobbyPanel');
+  const panel = el('gamePanel');
+  if (lobby) lobby.style.display = 'none';
+  if (panel) panel.style.display = '';
+  try { el('roomCode').textContent = 'TUTORIAL'; } catch (_) {}
+  try { el('phaseLabel').textContent = '🎓 Tutorial — demo board'; } catch (_) {}
+  const tutBtn = el('tutorialBtn');
+  if (tutBtn) {
+    tutBtn.textContent = '✕ Exit tutorial';
+    tutBtn.onclick = () => { try { window.close(); } catch (_) {} setTimeout(() => { try { history.back(); } catch (_) {} }, 100); };
+  }
+  const hostTools = el('hostTools');
+  if (hostTools) hostTools.style.display = 'none';
+  paintBoardOverlays();
+  paintSeats();
+  paintPiles();
+  fitStage();
+  window.addEventListener('resize', () => { try { fitStage(); } catch (_) {} });
+
+  const api = {
+    el,
+    prefersReducedMotion,
+    playSound,
+    narrate: key => { try { narrate(key); } catch (_) {} },
+    paintAll: () => { paintBoardOverlays(); paintSeats(); paintPiles(); },
+    fitStage,
+    resetCinematic,
+    showTally: opts => showTallyCinematic(opts),
+    playEnact: (tile, count, opts) => playEnactCinematic(tile, count, opts),
+    showPowerCallout: power => showPowerCalloutCinematic(power),
+    showVeto: tracker => showVetoCinematic(tracker),
+    cancelAnims: () => { resetCinematic(); },
+    setMeta: patch => { currentMeta = { ...currentMeta, ...patch }; },
+    setVotes: ({ cast, revealed, values }) => {
+      votesCastMap = cast || {};
+      votesRevealedFlag = !!revealed;
+      votesMap = values || {};
+    },
+    resetDemoState: () => {
+      currentMeta = { ...tutBaseMeta() };
+      currentPlayers = tutBasePlayers();
+      deckCount = 14;
+      discardCount = 1;
+      votesCastMap = {};
+      votesMap = {};
+      votesRevealedFlag = false;
+      execState = null;
+      tutExecUid = null;
+      resetCinematic();
+      clearTutWin();
+      clearTutExec();
+      // Keep demo seats (no alive=false); sanitized exec is purely visual.
+      paintBoardOverlays();
+      paintSeats();
+      paintPiles();
+    },
+    chaosShake: () => {
+      const table = el('table');
+      if (table && !prefersReducedMotion()) {
+        table.classList.remove('shake');
+        void table.offsetWidth;
+        table.classList.add('shake');
+        setTimeout(() => table.classList.remove('shake'), 550);
+      }
+    },
+    // Sanitized execution: crosshair lock → stamp + tombstone. No blood
+    // image, no screen flash, no shake, no scream — safe for game night.
+    sanitizedExec: uid => {
+      clearTutExec();
+      tutExecUid = uid;
+      const seat = document.querySelector(`.seat[data-uid="${uid}"]`);
+      if (!seat) return;
+      seat.classList.add('exec-target', 'tut-exec');
+      const cross = document.createElement('div');
+      cross.className = 'exec-crosshair tut-exec-cross';
+      cross.setAttribute('aria-hidden', 'true');
+      cross.textContent = '◎';
+      seat.appendChild(cross);
+      setTimeout(() => {
+        if (tutExecUid !== uid) return;
+        const s = document.querySelector(`.seat[data-uid="${uid}"]`);
+        if (!s) return;
+        const crossNow = s.querySelector('.tut-exec-cross');
+        if (crossNow) crossNow.remove();
+        const stamp = document.createElement('div');
+        stamp.className = 'exec-stamp slam tut-exec-stamp';
+        stamp.textContent = 'EXECUTED';
+        s.appendChild(stamp);
+        const tomb = document.createElement('img');
+        tomb.className = 'exec-tomb rise';
+        tomb.src = 'img/icon-tombstone.png';
+        tomb.alt = 'RIP';
+        tomb.draggable = false;
+        s.appendChild(tomb);
+        s.classList.add('exec-dead');
+      }, prefersReducedMotion() ? 150 : 900);
+    },
+    clearExec: () => clearTutExec(),
+    showWin: (winner, reason) => {
+      currentMeta = { ...currentMeta, winner, winReason: reason };
+      showWinTakeover(winner, reason);
+      const rematch = el('rematchBtn');
+      if (rematch) rematch.style.display = 'none'; // no live rematch in sandbox
+    },
+    clearWin: () => clearTutWin(),
+    onExit: () => { try { window.close(); } catch (_) {} },
+  };
+  import('./tutorial-director.js')
+    .then(m => m.startBoardTutorial(api))
+    .catch(e => console.warn('[board] tutorial director failed:', e && e.message));
+}
+
+function clearTutExec() {
+  tutExecUid = null;
+  try {
+    document.querySelectorAll('.tut-exec-cross, .tut-exec-stamp').forEach(n => n.remove());
+    document.querySelectorAll('.seat.tut-exec').forEach(s => {
+      s.classList.remove('tut-exec', 'exec-target');
+      const tomb = s.querySelector('.exec-tomb');
+      if (tomb) tomb.remove();
+    });
+  } catch (_) {}
+}
+
+function clearTutWin() {
+  try {
+    const win = el('winTakeover');
+    if (win) {
+      win.classList.remove('show', 'liberal', 'fascist');
+      win.setAttribute('aria-hidden', 'true');
+    }
+    resetCinematic();
+  } catch (_) {}
 }
 
 function showTutorialStep(i) {
@@ -2230,6 +2392,7 @@ function paintTrackerPips(tracker) {
 // Per-round vote mirrors for seat dots. Re-subscribes when roundId changes;
 // old listeners are torn down so dots never show a stale round's votes.
 function watchRoundExtras() {
+  if (isTutorialSandbox) return;
   const roundId = currentMeta.roundId;
   if (roundId === extrasRound) return;
   extrasRound = roundId;
