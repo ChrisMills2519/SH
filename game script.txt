@@ -1,0 +1,73 @@
+Here — same final script, with game reference per line for your Audacity chop + wiring later. narr_XX = filename, Ref = where it fires in your code.
+
+A. LOBBY
+
+narr_01 Welcome to Secret Hitler. — Ref: board.js:760 phase=lobby
+narr_02 Liberals outnumber Fascists, but the Fascists know each other. — Ref: lobby explainer
+narr_03 Find Hitler. Stop the Fascist agenda. Trust no one. — Ref: lobby explainer
+narr_04 Check your phone to see your secret role. Shield your screen. — Ref: play.js:169 tap-to-reveal
+narr_05 Tap your role card to reveal it. Keep it hidden. — Ref: play.js:169
+narr_06 The game begins. Good luck. — Ref: board.js:80 startGame(), sound: game-start
+B. NOMINATION
+
+narr_07 Mister President, nominate your Chancellor. — Ref: board.js:178 watchForNomination, meta.phase=nomination
+narr_08 The President picks a Chancellor, then everyone votes. The last elected leaders cannot be picked again. — Ref: tutorial round 0-1 only, game-logic.js:140 ineligibleChancellorCandidates
+narr_09 Term limits apply. The last President and Chancellor are ineligible. — Ref: game-logic.js:140, rounds 2+
+narr_10 Waiting for the nomination. — Ref: idle / play.js:199 describeWhosTurn nomination
+C. ELECTION
+
+narr_11 The vote is open. Vote Ya, or Nine, on your phone now. — Ref: board.js:217 watchForVotes, meta.phase=election
+narr_12 Government elected. Presidency proceeds to legislation. — Ref: board.js:265 resolveElection majority=true, sound: election-pass
+narr_13 Vote failed. The election tracker advances by one. — Ref: board.js:266 tracker+1, sound: election-fail
+narr_14 Tracker at one of three. — Ref: meta.electionTracker=1
+narr_15 Tracker at two of three. One more failure means chaos. — Ref: meta.electionTracker=2
+narr_16 Waiting for all votes. — Ref: play.js:248 renderVoting waiting state
+D. CHAOS
+
+narr_17 Three failed votes. Chaos. — Ref: board.js:320 runChaos, sound: chaos
+narr_18 The country is in turmoil. The top policy enacts itself. — Ref: runChaos takeTiles(1)
+narr_19 Term limits forgotten. Tracker reset. — Ref: runChaos clears presidentUidLast/chancellorUidLast
+E. LEGISLATION
+
+narr_20 Mister President, discard one policy in secret. Pass two to your Chancellor. — Ref: meta.phase=legislative_president, board.js:466 watchForPresidentChoice
+narr_21 Never state exact tiles. You may lie, or tell the truth. — Ref: tutorial round 0-1 only
+narr_22 Mister Chancellor, enact one policy in secret. Discard the other unseen. — Ref: meta.phase=legislative_chancellor, board.js:522 watchForChancellorEnact
+narr_23 Waiting for legislation. — Ref: idle play.js:199 legislative_*
+F. ENACTS
+
+narr_24 Liberal policy enacted. — Ref: generic, sound: enact-liberal
+narr_25 One Liberal. Four to go. — Ref: meta.liberalTrack=1
+narr_26 Two Liberals. Liberals are gaining ground. — Ref: meta.liberalTrack=2
+narr_27 Three Liberals. The Fascists are nervous. — Ref: meta.liberalTrack=3
+narr_28 Four Liberals. One more for a Liberal victory. — Ref: meta.liberalTrack=4
+narr_29 Fascist policy enacted. — Ref: generic, sound: enact-fascist
+narr_30 Fascists advance. The presidency gains new power. — Ref: game-logic.js:44 executivePowerFor != null
+G. POWERS INTRO
+
+narr_31 Policy Peek. The President views the top three tiles in secret. — Ref: meta.pendingPower=policy_peek, game-logic.js:32 small-3
+narr_32 Investigate Loyalty. The President learns one player's true allegiance. — Ref: pendingPower=investigate_loyalty, mid-2 / large-1,2
+narr_33 That result is private. Share it, or lie about it. Your choice. — Ref: post-investigate, board.js:678 investigateResult
+narr_34 Special Election. The President chooses the next President. — Ref: pendingPower=special_election, mid-3 / large-3
+narr_35 Execution. The President must execute one player. — Ref: pendingPower=execution, all brackets 4,5
+narr_36 Waiting for the Presidential power. — Ref: idle meta.phase=executive_action
+H. POWERS OUTRO
+
+narr_37 The peek is complete. Presidency passes. — Ref: board.js:731 policyPeekSeen, advancePresidency()
+narr_38 The investigation is complete. Presidency passes. — Ref: post-investigateTarget, advancePresidency()
+narr_39 A special election has been called. Normal rotation will resume after. — Ref: board.js:686 specialElectionTarget, specialElectionReturnUid
+narr_40 A player has been executed. They were not Hitler. — Ref: board.js:637 executionTarget, checkExecutionWin=false
+narr_41 A player has been executed. The game continues without them. — Ref: alt / generic execution
+I. VETO
+
+narr_42 Veto power is now unlocked. — Ref: game-logic.js:52 vetoUnlocked fascistTrack>=5
+narr_43 After five Fascists, the Chancellor may propose discarding both tiles. The President must agree. — Ref: tutorial once on unlock
+narr_44 Veto proposed. Mister President, agree or refuse. — Ref: board.js:578 vetoRequested=true
+narr_45 Veto agreed. Both policies discarded. Tracker advances. — Ref: vetoDecision=agreed
+narr_46 Veto refused. Chancellor, you must enact. — Ref: vetoDecision=refused, vetoUsed=true
+J. WIN
+
+narr_47 Five Liberal policies. Liberals win. — Ref: game-logic.js:149 five_liberal_policies, sound: win-liberal
+narr_48 Six Fascist policies. Fascists win. — Ref: six_fascist_policies, sound: win-fascist
+narr_49 Hitler has been elected Chancellor. Fascists win. — Ref: hitler_elected_chancellor fascistTrack>=3
+narr_50 Hitler has been executed. Liberals win. — Ref: game-logic.js:157 hitler_executed
+narr_51 Game over. Thank you for playing. Start a new game to play again. — Ref: board.js:745 endGame phase=gameover

@@ -65,9 +65,36 @@ re-rendered at 2x from Ying Tong Li's CC BY-NC-SA vector rebuild plus Kenney CC0
 power icons. Full credits in `public/ATTRIBUTION.md`; originals backed up in
 `public/img/original-2026-09-17/`.
 
-**Not implemented:** reconnect-with-same-identity if a phone's browser data is cleared (a
-refresh is fine, but a *new browser* means a new anonymous UID and no way back into your
-seat), and there's no spectator mode beyond the executed-player banner.
+**Host display (board.html):** the board is a fixed-size *stage* that only ever scales —
+`fitStage()` sets one `--fit` factor so the whole scene fits whatever screen hosts it, with
+no scrolling and no way for the interior to reflow onto itself. The canvas is picked from
+the host's aspect: a 16:9 screen gets the two boards side by side (1600×760), a 4:3 or
+portrait screen gets them stacked (1000×950). `board.html?room=CODE&layout=wide|tall`
+overrides that if the automatic choice reads wrong. Narration is a row inside the stage
+and the host tools sit below it in normal flow, so neither can cover a seat.
+
+**Reconnect after browser data loss:** each phone gets a 4-digit reconnect code on join
+(shown once — save it). On the landing page use **Reconnect to your seat** (name + room
+code + code), or open `play.html?room=CODE&reconnect=1&pin=CODE` directly on the new
+browser, and the board moves your seat (role, teammates, turn state, even in-flight
+ballots) onto the new UID. The board tab has to be open — it's the only reader of the
+PINs, so a request waits until the host screen is up. A wrong name/code is rejected with
+a clear error. A plain refresh or reopening the tab in the same browser needs none of
+this: the seat is still yours.
+**Re-checking your role mid-game:** every phone has a **🎴 My role** button in the top bar
+(next to the sound toggle) once the seat has joined. It opens a full-screen card showing your
+role and, if you have any, the allies you know — reachable on **every** phase, not just the
+night reveal and the idle screen. It closes on ✕, on a tap outside the card, on Esc, and by
+itself after 20 seconds, and `closeRoleMenu()` empties the menu body so a phone left face-up
+on the table has no role sitting in the DOM.
+
+One honesty note on that screen: `secret/knownTeammates/{uid}` is a **flat** `{uid, name}`
+list, and a Fascist's list holds the other Fascists *and* Hitler with no role on any entry. So
+the menu can say who is on your side, and says so in as many words — “the app lists them
+together, it does not mark which is Hitler.” It does not pretend to know more than the data
+(allies in the physical game *do* know who Hitler is; the app doesn't store it that way).
+
+**Not implemented:** there's no spectator mode beyond the executed-player banner.
 
 <!-- DEV-ONLY START: delete this section with dev-bots.js before game night. -->
 ## Dev testing (solo playtest shortcuts — remove before game night)
@@ -83,7 +110,31 @@ seat), and there's no spectator mode beyond the executed-player banner.
 - Requires the dev database rules: `firebase deploy --only database --config firebase.dev.json
   --project secreth-10e81`. **Revert right after testing** with `firebase deploy --only
   database --project secreth-10e81` (prod `security-rules.json`).
-- Removal checklist: delete `public/js/dev-bots.js`, `security-rules.dev.json`,
+- `preview-fit.html` also measures real geometry after every fit (rect collisions between the
+  rails/columns/boards, spill past the stage frame, off-centre slack, and how much of the stage
+  the content fills) and dumps it as JSON into the hidden `#probeData` element. `chrome
+  --headless --dump-dom` can read that without a debugger — which is how the stage centring bug
+  was caught: `place-items: center` clamps an oversized item to the start corner inside a scroll
+  container, so the board sat down-and-right by `(1 - fit) * size / 2`. Keep that check when
+  touching the fit; it is not visible to the arithmetic. Note `--window-size=W,H` in headless
+  includes ~87px of window decoration, so pass `H + 87` for a true H-tall viewport.
+- `public/preview-layouts.html` frames `preview-fit.html` at several host screen sizes
+  (1080p TV, 4K, ultrawide, laptop, 4:3 projector, portrait, plus a custom size) and
+  reads each frame's own fit numbers back out — tier, scale, slack, and whether anything
+  is clipped. That's the way to check a projector you don't own. `?players=&phase=&layout=&tools=`
+  on `preview-fit.html` drive it.
+- `public/preview-play.html` is the phone-side mirror: no Firebase, so it renders the player
+  screens offline. Pick a screen, a device width (390 / 768 / full) and a role, and it uses the
+  real `css/style.css`, so what you see is honest. The **my role menu** screen opens the role
+  overlay (mirrored from `roleMenuHtml()`) over live nomination UI; the overlay is inside the
+  device frame (a `transform` on the frame makes it the containing block for `position: fixed`),
+  so it covers the simulated phone and not the browser window. No 20s autoclose there — that
+  would fight you while you're looking at it. `?screen=menu&role=fascist&width=390` is
+  shareable. `node scripts/check-role-menu.js` asserts the mirror still matches what
+  `play.js` ships, plus the escaping and the ids/classes both pages depend on.
+- Removal checklist: delete `public/js/dev-bots.js`, `public/preview-fit.html`,
+  `public/preview-play.html`, `public/preview-layouts.html`, `scripts/check-role-menu.js`,
+  `security-rules.dev.json`,
   `firebase.dev.json`, the `DEV-ONLY` blocks in `public/board.html` + `public/js/board.js` +
   `public/index.html`,
   and this section. Then redeploy database + hosting.

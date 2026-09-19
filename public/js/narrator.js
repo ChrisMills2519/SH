@@ -70,6 +70,67 @@ let unlocked = false;
 let enabled = true;
 let seenKeys = new Set();
 let phaseToken = 0;
+let subtitleFadeTimer = null;
+// Skip-with-fade state: currentAudio is the live clip, fadingAudio is a
+// previous clip still ramping to silence after a phase change.
+let currentAudio = null;
+let fadingAudio = null;
+let fadeTimer = null;
+const FADE_MS = 180;
+
+function clearFade() {
+  if (fadeTimer) {
+    try { clearInterval(fadeTimer); } catch (_) {}
+    fadeTimer = null;
+  }
+}
+
+function stopAudioInstant(audio) {
+  if (!audio) return;
+  try { audio.onended = null; } catch (_) {}
+  try { audio.onerror = null; } catch (_) {}
+  try { audio.pause(); } catch (_) {}
+}
+
+// Instant stop of everything (toggle-off, new game). No fade.
+function haltAllAudio() {
+  clearFade();
+  if (fadingAudio) { stopAudioInstant(fadingAudio); fadingAudio = null; }
+  if (currentAudio) { stopAudioInstant(currentAudio); currentAudio = null; }
+  playing = false;
+}
+
+// Phase-change skip: drop the backlog, fade the live clip out in the
+// background (~180ms) while the new phase clip starts immediately.
+function fadeOutCurrentForSkip() {
+  // A previous fade still running: cut it instantly, its phase is long gone.
+  if (fadingAudio) { stopAudioInstant(fadingAudio); fadingAudio = null; }
+  clearFade();
+  const old = currentAudio;
+  currentAudio = null;
+  playing = false;
+  if (!old) return;
+  try { old.onended = null; } catch (_) {}
+  try { old.onerror = null; } catch (_) {}
+  let startVol = 1;
+  try { startVol = Number.isFinite(old.volume) ? old.volume : 1; } catch (_) {}
+  fadingAudio = old;
+  const steps = 6;
+  const stepMs = Math.max(16, Math.round(FADE_MS / steps));
+  let i = 0;
+  fadeTimer = setInterval(() => {
+    i++;
+    try {
+      if (fadingAudio !== old) { clearFade(); return; }
+      old.volume = Math.max(0, startVol * (1 - i / steps));
+    } catch (_) {}
+    if (i >= steps) {
+      clearFade();
+      stopAudioInstant(old);
+      if (fadingAudio === old) fadingAudio = null;
+    }
+  }, stepMs);
+}
 
 try {
   // Default ON; the toggle persists an explicit off.
@@ -83,6 +144,14 @@ function setSubtitle(text) {
   if (!bar || !txt) return;
   txt.textContent = text;
   bar.style.display = 'block';
+  // Fresh line reads at full opacity, then fades to a whisper in place
+  // (the bar is docked in-flow above the table, so it never covers seats
+  // or boards). Hover (board has a mouse) restores it via CSS.
+  try {
+    bar.classList.remove('faded');
+    if (subtitleFadeTimer) clearTimeout(subtitleFadeTimer);
+    subtitleFadeTimer = setTimeout(() => bar.classList.add('faded'), 8000);
+  } catch (_) {}
 }
 
 function unlock() {
@@ -110,6 +179,7 @@ export function setNarratorEnabled(on) {
   if (!enabled) {
     queue.length = 0;
     phaseToken++; // cancel pending delayed reminders
+    haltAllAudio();
   }
   refreshNarratorToggle();
 }
@@ -147,11 +217,14 @@ function pump() {
   setSubtitle(next.subtitle);
   try {
     const a = new Audio(`snd/narr/${next.clip}.mp3`);
-    a.onended = () => { playing = false; pump(); };
-    a.onerror = () => { playing = false; pump(); };
+    try { a.volume = 1; } catch (_) {}
+    currentAudio = a;
+    a.onended = () => { if (currentAudio !== a) return; currentAudio = null; playing = false; pump(); };
+    a.onerror = () => { if (currentAudio !== a) return; currentAudio = null; playing = false; pump(); };
     const p = a.play();
-    if (p && typeof p.then === 'function') p.catch(() => { playing = false; pump(); });
+    if (p && typeof p.then === 'function') p.catch(() => { if (currentAudio !== a) return; currentAudio = null; playing = false; pump(); });
   } catch (_) {
+    currentAudio = null;
     playing = false;
     pump();
   }
@@ -187,9 +260,12 @@ export function narrateDelayed(key, clip, ms, stillValid) {
   }, ms);
 }
 
-// Call on every phase change so stale reminders never fire into a new phase.
+// Call on every phase change: drop the stale backlog, fade the live clip
+// (~180ms) and let the new phase clip start immediately.
 export function cancelNarratorPending() {
+  queue.length = 0;
   phaseToken++;
+  fadeOutCurrentForSkip();
 }
 
 // Fresh game in the same room: allow the per-round keys to fire again.
@@ -197,4 +273,5 @@ export function resetNarratorKeys() {
   seenKeys = new Set();
   queue.length = 0;
   phaseToken++;
+  haltAllAudio();
 }

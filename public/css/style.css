@@ -20,6 +20,16 @@
   --font-display: 'Playfair Display', 'Bodoni Moda', Georgia, serif;
   --font-body: 'EB Garamond', Georgia, serif;
   --font-mono: 'Special Elite', 'Courier New', monospace;
+
+  /* Shared texture recipes: the page backdrop and every paper panel draw from
+     the same layers, so the grain can't drift between them. Panels get a
+     slightly stronger dot than the backdrop (they sit closer to the eye) and
+     the light stock gets a dark speckle instead, since a white grain is
+     invisible on paper. */
+  --tex-grain: repeating-conic-gradient(rgba(232,224,212,0.02) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px;
+  --tex-panel-grain: repeating-conic-gradient(rgba(232,224,212,0.03) 0% 25%, transparent 0% 50%) 0 0 / 3px 3px;
+  --tex-scan: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.05) 3px 4px);
+  --tex-paper-grain: repeating-conic-gradient(rgba(0,0,0,0.04) 0% 25%, transparent 0% 50%) 0 0 / 3px 3px;
 }
 
 * { box-sizing: border-box; }
@@ -38,8 +48,8 @@ body::before {
   inset: 0;
   z-index: 0;
   background:
-    repeating-conic-gradient(rgba(232,224,212,0.02) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px,
-    repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.05) 3px 4px),
+    var(--tex-grain),
+    var(--tex-scan),
     radial-gradient(ellipse at 30% 20%, rgba(160,120,60,0.09) 0%, transparent 60%),
     radial-gradient(ellipse at 70% 80%, rgba(140,60,40,0.07) 0%, transparent 60%);
   pointer-events: none;
@@ -65,7 +75,8 @@ body.centered {
 
 .card {
   background:
-    repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.06) 3px 4px),
+    var(--tex-panel-grain),
+    var(--tex-scan),
     var(--panel);
   border: 2px solid #000;
   outline: 1px solid var(--border);
@@ -293,10 +304,10 @@ img { background: var(--panel); }
 }
 .role-banner { animation: banner-in 0.5s ease-out; }
 
-.role-banner.liberal { background: var(--liberal); }
-.role-banner.fascist { background: var(--fascist); }
-.role-banner.hitler { background: var(--hitler); }
-.role-banner.dead { background: #33373d; color: var(--muted); }
+.role-banner.liberal { background-color: var(--liberal); }
+.role-banner.fascist { background-color: var(--fascist); }
+.role-banner.hitler { background-color: var(--hitler); }
+.role-banner.dead { background-color: #33373d; color: var(--muted); }
 
 .policy-choice {
   display: flex;
@@ -382,9 +393,77 @@ body.play-view {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Phone top bar: sound + the role menu button, side by side. */
+.play-topbar { display: flex; gap: 8px; margin: 8px 0 10px; }
+
+/* Role menu (phones): a re-checkable view of your own card and your known
+   allies, available on every phase instead of only the idle screen and the
+   night gate. A fixed overlay so it covers whatever action UI is underneath,
+   on the same stock as the rest of the app, and closeRoleMenu() empties it so
+   nothing is left in the DOM afterwards. */
+.role-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.78);
+}
+.role-menu-sheet {
+  width: 100%;
+  max-width: 360px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+  text-align: center;
+  background: var(--tex-panel-grain), var(--tex-scan), var(--panel);
+  border: 2px solid #000;
+  outline: 1px solid var(--border);
+  box-shadow: var(--shadow-hard);
+}
+.role-menu-sheet .role-img { max-width: 220px; }
+.role-menu-close { width: auto; margin: 0 0 10px; }
+.role-menu-team {
+  margin: 8px 0 4px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+/* Ally names get the size of the role caption: this is the line a Fascist is
+   actually squinting at across a table. */
+.role-menu-names {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+}
+.role-menu-shield {
+  margin: 12px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Reconnect slip: a carbon-copy clipping taped to the dossier, not a UI banner.
+   Both ids share the rule — #pinBanner is the real phone page, #ppPin is the
+   static preview's twin, and they must not drift apart. The gold left tab is
+   kept from the app's dispatch style so it still reads as app chrome rather
+   than something the game printed. */
 #pinBanner, #ppPin {
-  background: rgba(0,0,0,0.35);
-  border: 1px dashed var(--border);
+  background: var(--tex-paper-grain), var(--paper);
+  color: var(--paper-ink);
+  border: 1px dashed #7a705e;
   border-left: 3px solid var(--accent);
   padding: 8px 12px;
   border-radius: 0;
@@ -392,10 +471,8 @@ body.play-view {
   font-size: 12px;
   letter-spacing: 0.08em;
   font-style: normal;
-}
-/* Reconnect slip: slightly rotated, like it's stamped onto the dossier. */
-#ppPin {
   transform: rotate(-0.5deg);
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.45);
   margin: 10px 0;
 }
 
@@ -539,10 +616,13 @@ body.reveal-liberal::after { animation: reveal-flash-liberal 0.9s ease-out; }
   text-transform: uppercase;
   font-size: 15px;
 }
-.power-header.investigate { background: rgba(59,111,214,0.15); border-left: 4px solid var(--liberal); }
-.power-header.execution { background: rgba(192,57,43,0.18); border-left: 4px solid var(--fascist-bright); }
-.power-header.special { background: rgba(201,168,76,0.15); border-left: 4px solid var(--accent); }
-.power-header.peek { background: rgba(138,128,120,0.12); border-left: 4px solid var(--muted); }
+/* Tints are background-color (not the `background` shorthand) on purpose: the
+   shared cardstock pass at the end of this file sets background-image, and a
+   shorthand here would reset that layer and leave these the only flat panels. */
+.power-header.investigate { background-color: rgba(59,111,214,0.15); border-left: 4px solid var(--liberal); }
+.power-header.execution { background-color: rgba(192,57,43,0.18); border-left: 4px solid var(--fascist-bright); }
+.power-header.special { background-color: rgba(201,168,76,0.15); border-left: 4px solid var(--accent); }
+.power-header.peek { background-color: rgba(138,128,120,0.12); border-left: 4px solid var(--muted); }
 
 /* Waiting state animation */
 @keyframes waiting-pulse {
@@ -709,8 +789,6 @@ body.reveal-liberal::after { animation: reveal-flash-liberal 0.9s ease-out; }
 
 @media (max-width: 900px) and (min-width: 701px) {
   .board-wrap { padding: 20px; }
-  .seat { width: 68px; }
-  .seat-col { min-width: 68px; }
   .board-header-controls { gap: 6px; }
   .sound-toggle { font-size: 13px; padding: 5px 10px; }
 }
@@ -880,15 +958,12 @@ body.reveal-liberal::after { animation: reveal-flash-liberal 0.9s ease-out; }
 .pile-draw-badge { left: 10px; }
 .pile-discard-badge { right: 10px; }
 
-@media (max-width: 700px) {
-  .table { padding: 10px 8px; }
-  .table-middle { flex-direction: column; }
-  .seat-col { flex-direction: row; justify-content: center; flex-wrap: wrap; min-width: 0; }
-  .seat { width: 60px; }
-  .policy-well { margin: -20px auto -18px; }
-  .policy-fan { height: 78px; }
-  .policy-fan img { width: 50px; }
-}
+/* The board's interior is no longer tuned per viewport width. Width media
+   queries used to resize the table, seats and policy well directly, which is
+   exactly how the interior could end up disagreeing with the box around it.
+   The stage owns the interior now (see the fit-to-screen block below): the
+   only width-sensitive rules left on this page are the phone styles for
+   play.html's own components (.policy-tile-img, .role-img above). */
 
 @media (prefers-reduced-motion: reduce) {
   .policy-fan img { animation: none; }
@@ -929,87 +1004,170 @@ div.policy-tile .flip-face { width: 100%; height: 100%; }
   div.policy-tile.flip-scene { width: 84px; height: 118px; }
 }
 
-/* Host fit-to-screen (board.html, wide screens only): the whole game must fit
-   in one viewport height with no scrolling on the shared display. No height
-   breakpoint — the layout scales continuously (vmin seats, dvh-capped boards,
-   measured JS guard below), so there is no threshold to fall off. Narrow
-   windows and phones keep the natural scrolling layout above. */
-@media (min-width: 1100px) {
-  body .board-wrap {
-    height: 100vh;
-    height: 100dvh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    max-width: none;
-    padding: 10px 24px;
-  }
+/* ===========================================================================
+   Fit-to-screen (board.html): the board is a fixed-size STAGE.
 
-  /* Header compresses once the game starts (body.in-game is toggled by render()). */
-  body.in-game .board-header { margin-bottom: 6px; }
-  body.in-game .board-header-top h1 { font-size: 22px; margin: 0 0 4px; }
-  body.in-game .logo-small { display: none; }
+   Two consequences, and both are the point:
 
-  #gamePanel { margin: 0; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-  #gamePanel::before { display: none; }
+   1. The interior never reflows. Seats, boards, the policy well and the
+      narration bar occupy disjoint grid cells sized in stage units, so they
+      cannot land on top of each other whatever the host screen looks like.
+      Every viewport-relative size inside the table is gone — the vmin seat
+      clamp, `min(700px, 110dvh)` board cap and flex-wrap rails were what let
+      the interior drift out of its box and collide.
+   2. Only the whole scene scales, by ONE factor, to the hosting screen.
+      fitStage() measures the stage viewport and sets --fit; .table is scaled
+      around its own centre. Leftover space is page background (letterbox),
+      never a scrollbar and never an overlap.
 
-  .table {
-    flex: 1 1 auto;
-    min-height: 0;
-    margin: 6px 0;
-    padding: 8px 14px;
-    transform-origin: top center;
-  }
-  .table-middle { min-height: 0; }
-  /* Boards narrow on short windows via width (tile/pip % overlays stay
-     aligned); at 1080p+ this is still the full width below. */
-  .table-center { max-width: 700px; max-width: min(700px, 110vh); max-width: min(700px, 110dvh); }
-  .table-center .boards { margin: 2px 0; gap: 6px; }
+   The canvas depends on the host's aspect, because two 2.49:1 boards stacked
+   need a tall canvas while a 16:9 screen wants them side by side:
+     - wide tier (screen aspect >= 1.5): 1600x760, boards flank the policy well
+     - tall tier (screen aspect  < 1.5): 1000x950, boards stacked
+   fitStage() picks the tier from the live SCREEN aspect (not the leftover
+   stage viewport, which shrinks when the host tools appear — that flipped a
+   1024x768 board mid-game) and sets the class, so the canvas and the interior
+   can never disagree; ?layout=wide|tall overrides it for a host whose screen
+   reports an aspect that reads wrong.
 
-  /* Seats shrink with the viewport instead of costing a fixed ~240px. */
-  .seat-row { min-height: 0; padding: 2px 4px; gap: 8px; }
-  .seat-col { gap: 8px; min-width: 0; padding: 4px 0; }
-  .seat { width: clamp(52px, 7vmin, 64px); }
+   Interior budget for each tier (seat 84 wide -> 118 card + ~19 name = 141;
+   boards are 1600x643 = 2.488, identical for all four bracket variants):
+   Seat height = 84/0.712 card + name plate = 141; boards are 2.488 across.
+     wide 1600x760: padding 44 -> rows 141 + 340 + 141 + 52 + gaps 42 = 716.
+       side rail 2 seats = 296 <= 340; boards 580 -> 233 <= 340
+       centre 1360 wide; 2*580 + well 170 + gaps 28 = 1358 <= 1360
+     tall 1000x950: padding 44 -> rows 141 + 480 + 141 + 52 + gaps 42 = 856.
+       side rail 2 seats = 296 <= 480; boards 425 -> 171; 2*171 + well 88
+       + gaps 28 = 458 <= 480 — and 2 lines of narration (80 not 52) leaves
+       452... 6 short, which is why the tall canvas is 950 and not 900.
+   =========================================================================== */
+body.layout-wide { --stage-w: 1600px; --stage-h: 760px; }
+body.layout-tall { --stage-w: 1000px; --stage-h: 950px; }
+/* Coherent defaults for the one frame before fitStage() runs. */
+body { --stage-w: 1600px; --stage-h: 760px; --fit: 1; }
 
-  /* Policy well slims down to match. */
-  .policy-well { margin: -18px auto -16px; }
-  .policy-fan { height: 64px; }
-  .policy-fan img { width: 44px; }
+body.in-game .board-wrap {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: none;
+  padding: 10px 18px;
+}
 
-  /* In-flow extras become overlays so they never cost layout height. */
-  #narrBar {
-    position: fixed;
-    left: 50%;
-    bottom: 12px;
-    transform: translateX(-50%);
-    max-width: min(720px, 90vw);
-    margin: 0;
-    z-index: 60;
-    font-size: 18px;
-  }
-  #hostTools {
-    position: fixed;
-    right: 12px;
-    bottom: 12px;
-    max-width: 320px;
-    margin: 0;
-    z-index: 61;
-    background: rgba(22, 24, 28, 0.95);
-  }
-  /* In-game the host tools are a transient skip button, not a panel: strip
-     the heading and help text so they cover as little of the table as possible. */
-  body.in-game #hostTools { padding: 10px; }
-  body.in-game #hostTools h3,
-  body.in-game #hostTools p.muted { display: none; }
-  #gameOverBanner {
-    position: fixed;
-    inset: 0;
-    margin: auto;
-    height: fit-content;
-    max-width: 640px;
-    z-index: 70;
-    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.6);
-  }
+/* Header compresses once the game starts (body.in-game is toggled by render()). */
+body.in-game .board-header { margin-bottom: 6px; }
+body.in-game .board-header-top h1 { font-size: 22px; margin: 0 0 4px; }
+body.in-game .logo-small { display: none; }
+/* Room code / player bracket: host chrome, deliberately outside the stage so it
+   stays legible at its own size instead of shrinking with the scene. */
+.board-meta { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; }
+/* The phase line sits directly above the stage, so its own margins are board
+   size. As a bare <p> the default 1em top/bottom cost 28px on a 1080p host
+   (measured: a 30px line occupying 58px of the column). Trimmed to the minimum
+   that still separates it from the badge. */
+.phase-line { margin: 4px 0 8px; }
+
+#gamePanel { margin: 0; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+#gamePanel::before { display: none; }
+
+/* The measured viewport. The stage inside it is deliberately OVERSIZED (that is
+   what there is to scale down), and an oversized item cannot be centred by
+   alignment: overflow:hidden makes this a scroll container, and alignment in a
+   scroll container falls back to start-alignment so content stays reachable.
+   With place-items:center that put the visible board down-and-right by
+   (1 - fit) * size / 2 — 370px right, 176px down at 1280x720, half off screen.
+   So the stage is taken out of flow and centred explicitly instead: 50% puts
+   its top-left at the centre, translate(-50%,-50%) pulls it back by half its
+   own box, and the scale is about that centre. Nothing to clamp, nothing to
+   depend on alignment semantics for. */
+.stage-fit {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.table {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--stage-w);
+  height: var(--stage-h);
+  padding: 22px;
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 14px;
+  transform: translate(-50%, -50%) scale(var(--fit, 1));
+  transform-origin: center center;
+}
+.seat-top { grid-area: 1 / 1 / 2 / 4; }
+.seat-bottom { grid-area: 3 / 1 / 4 / 4; }
+.table-middle {
+  grid-area: 2 / 1 / 3 / 4;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+.table-center { min-width: 0; max-width: none; margin: 0; }
+
+/* Rails and columns: fixed seat size in stage units, and no wrapping — the
+   rail split (paintSeats) is what decides how many seats a rail gets. */
+.seat-row { display: flex; justify-content: center; align-items: center; gap: 14px; min-height: 0; padding: 0; flex-wrap: nowrap; }
+.seat-col { display: flex; flex-direction: column; justify-content: center; gap: 14px; min-width: 0; padding: 0; }
+.seat { width: 84px; }
+.seat .seat-name { font-size: 15px; }
+
+/* Boards. Capped in stage units so their height can never exceed the middle
+   row — the cap is the arithmetic above, not a viewport measurement. */
+.boards { flex-direction: column; gap: 14px; margin: 0; align-items: center; justify-content: center; }
+.board-stage { width: 100%; max-width: 425px; }
+.policy-well { margin: 0; }
+.policy-fan { height: 64px; }
+.policy-fan img { width: 44px; }
+.policy-well-label { font-size: 15px; }
+
+/* Wide tier: the two boards flank the policy well on one row. */
+body.layout-wide .boards { flex-direction: row; }
+body.layout-wide .board-stage { flex: 1 1 0; max-width: 580px; }
+body.layout-wide .policy-well { flex: 0 0 170px; }
+body.layout-wide .policy-well-label { white-space: normal; line-height: 1.3; }
+
+/* Narration is part of the scene: its own stage row, so it cannot sit on the
+   bottom rail the way the old fixed overlay did, and it scales with the table
+   instead of floating at a fixed 18px over a resized board. */
+#narrBar {
+  grid-area: 4 / 1 / 5 / 4;
+  position: static;
+  transform: none;
+  max-width: none;
+  margin: 0;
+  font-size: 20px;
+}
+
+/* Host-only escape hatches stay OUT of the stage: full-size tap targets, in
+   normal flow below it, so showing them shrinks the stage (fitStage re-fits)
+   rather than covering the bottom seats. */
+#hostTools { margin: 6px 0 0; }
+body.in-game #hostTools { padding: 10px; }
+body.in-game #hostTools h3,
+body.in-game #hostTools p.muted { display: none; }
+
+/* Game over is a modal and is meant to cover everything (the 100vmax shadow is
+   the dimmer), so it is the one element allowed over the stage. */
+#gameOverBanner {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  max-width: 640px;
+  z-index: 70;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.6);
 }
 
 /* DEV-ONLY sidebar: the solo-testing panel docks to the right edge with its
@@ -1042,4 +1200,24 @@ div.policy-tile .flip-face { width: 100%; height: 100%; }
   body.dev-tools-hidden #devPanel { display: none !important; }
   body.dev-tools-hidden .board-wrap { padding-right: 24px; }
   body.dev-tools-hidden #hostTools { right: 12px; }
+}
+
+/* Cardstock pass: the flat panels the phones and the TV stare at get the same
+   stock as the page backdrop and the landing card.
+
+   Two things about where this sits, both load-bearing:
+   - It is LAST, and it sets only `background-image`. That way each panel keeps
+     the background-color chosen by the rules above, and nothing has to be
+     restated here.
+   - The `background` shorthand resets the image layer, so any *variant* rule
+     (.role-banner.liberal, .power-header.peek, ...) that used the shorthand
+     would both win on specificity and wipe the grain. Those now set
+     background-color instead — see the notes on each.
+   .player-chip is deliberately excluded: the president/chancellor chips encode
+   state in a gradient tint, and grain over a 20px pill just muddies it. */
+.vote-frame,
+.power-header,
+.role-banner,
+#hostTools {
+  background-image: var(--tex-panel-grain), var(--tex-scan);
 }

@@ -14,7 +14,12 @@
 <body class="play-view">
   <div class="board-wrap" style="max-width:480px">
     <p class="muted" id="status"></p>
-    <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+    <div class="play-topbar">
+      <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+      <!-- My role: re-checkable on every phase, not just the idle screen.
+           Revealed by initRoleMenu() once this seat has actually joined. -->
+      <button id="roleMenuBtn" class="sound-toggle" type="button" style="display:none">🎴 My role</button>
+    </div>
     <p class="muted" id="pinBanner" style="display:none"></p>
     <div id="reconnectBox" style="display:none">
       <h2>Reconnect to an existing seat</h2>
@@ -26,6 +31,17 @@
     </div>
     <div id="main"></div>
   </div>
+
+  <!-- Role menu. Outside .board-wrap so its fixed overlay is never affected by
+       that container, and emptied on close so a role can't be left sitting in
+       the DOM for the next person who picks the phone up. -->
+  <div id="roleMenu" class="role-menu" role="dialog" aria-modal="true" aria-label="Your secret role" style="display:none">
+    <div class="role-menu-sheet">
+      <button id="roleMenuClose" class="sound-toggle role-menu-close" type="button">✕ Close</button>
+      <div id="roleMenuBody"></div>
+    </div>
+  </div>
+
   <script type="module" src="js/play.js"></script>
 </body>
 </html>

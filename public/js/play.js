@@ -67,6 +67,9 @@ async function main() {
 
   await ensureMyPin();
   attachListeners();
+  // Only once this seat has actually joined — the reconnect flow has no role
+  // yet and its own UI owns the screen.
+  initRoleMenu();
 }
 
 function attachListeners() {
@@ -157,8 +160,13 @@ async function runReconnectFlow() {
   const box = el('reconnectBox');
   box.style.display = 'block';
   if (nameFromUrl) el('reconnectName').value = nameFromUrl;
+  // Landing-page path passes the code along (?pin=1234) so it is typed once,
+  // not twice. Arriving with a code is an explicit intent: submit right away,
+  // and a wrong code just leaves the fields up for a corrected retry.
+  const pinFromUrl = (params.get('pin') || '').trim();
+  if (pinFromUrl) el('reconnectPin').value = pinFromUrl;
   el('status').textContent = 'Reconnect to your seat';
-  el('reconnectBtn').addEventListener('click', async () => {
+  const submit = async () => {
     const name = el('reconnectName').value.trim();
     const pin = el('reconnectPin').value.trim();
     const statusEl = el('reconnectStatus');
@@ -174,7 +182,9 @@ async function runReconnectFlow() {
       return;
     }
     watchReclaimOutcome(name, pin, statusEl);
-  });
+  };
+  el('reconnectBtn').addEventListener('click', submit);
+  if (pinFromUrl) submit();
 }
 
 // Outcome watch: status=approved (or role arrival, same update) means the
@@ -199,6 +209,7 @@ function watchReclaimOutcome(name, pin, statusEl) {
     });
     await ensureMyPin();
     attachListeners();
+    initRoleMenu();
   };
   onValue(reqRef, async snap => {
     if (settled) return;
@@ -834,6 +845,87 @@ function renderPolicyPeek() {
       el('main').innerHTML = `<p class="muted">Resuming game...</p>`;
     });
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Role menu (phones).
+//
+// The role card and the ally list only existed on the idle screen and the night
+// gate; every phase with action UI (nomination, election, legislation, a power)
+// replaced them, so there was no way to re-check who you are mid-game. This is
+// a re-checkable view, deliberately outside #main so a re-render can't wipe it
+// while it's being read, and it closes itself so a phone left face-up on the
+// table doesn't keep a role on screen.
+//
+// Copy note: knownTeammates is a flat [{uid, name}] list. A Fascist's list holds
+// the other Fascists AND Hitler with no role attached, so this can say who is on
+// your side but NOT which of them is Hitler — the wording stays inside that.
+const ROLE_MENU_AUTOCLOSE_MS = 20000;
+let roleMenuTimer = null;
+let roleMenuReady = false;
+
+function initRoleMenu() {
+  if (roleMenuReady) return;
+  const btn = el('roleMenuBtn');
+  const menu = el('roleMenu');
+  if (!btn || !menu) return;
+  roleMenuReady = true;
+  btn.style.display = 'inline-block';
+  btn.addEventListener('click', openRoleMenu);
+  el('roleMenuClose').addEventListener('click', closeRoleMenu);
+  // Tap the backdrop to dismiss (but not a tap inside the sheet).
+  menu.addEventListener('click', e => { if (e.target === menu) closeRoleMenu(); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeRoleMenu(); });
+}
+
+function openRoleMenu() {
+  const body = el('roleMenuBody');
+  const menu = el('roleMenu');
+  if (!body || !menu) return;
+  body.innerHTML = roleMenuHtml();
+  menu.style.display = 'flex';
+  clearTimeout(roleMenuTimer);
+  roleMenuTimer = setTimeout(closeRoleMenu, ROLE_MENU_AUTOCLOSE_MS);
+}
+
+function closeRoleMenu() {
+  clearTimeout(roleMenuTimer);
+  roleMenuTimer = null;
+  const menu = el('roleMenu');
+  if (!menu) return;
+  menu.style.display = 'none';
+  // Empty it: a closed menu should leave no role in the DOM to find.
+  el('roleMenuBody').innerHTML = '';
+}
+
+function roleMenuHtml() {
+  if (!myRole) {
+    return `<p class="muted">Waiting for the host to start the game — your role arrives then.</p>`;
+  }
+  const label = myRole === 'hitler' ? 'Hitler' : myRole[0].toUpperCase() + myRole.slice(1);
+  const img = myRole === 'hitler' ? 'role-hitler' : `role-${myRole}`;
+  const mates = myTeammates.map(t => escapeHtml(t.name));
+  let team = '';
+  if (mates.length) {
+    // A Fascist's list is allies + Hitler; Hitler's own list is the Fascists.
+    const heading = myRole === 'hitler' ? 'Your Fascists' : 'Your allies';
+    const note = myRole === 'hitler'
+      ? 'These Fascists know who you are.'
+      : 'Fascists and Hitler. The app lists them together — it does not mark which is Hitler.';
+    team = `<p class="role-menu-team">${heading}</p>
+      <p class="role-menu-names">${mates.join('<br />')}</p>
+      <p class="muted">${note}</p>`;
+  } else {
+    team = `<p class="muted">${myRole === 'hitler'
+      ? 'In a 7–10 player game Hitler knows no one — the Fascists know you.'
+      : 'You know nobody. Read the table, not the cards.'}</p>`;
+  }
+  return `
+    <img class="role-img" src="img/${img}.png" alt="${label}" />
+    <p class="role-caption">${label}</p>
+    ${team}
+    <p class="role-menu-shield">Shield your screen</p>
+  `;
 }
 
 function escapeHtml(str) {

@@ -6,7 +6,7 @@
 // flagged `isBot: true`. Fast-forward brains: always vote Ja, random
 // legal moves everywhere else. Only imported when `?dev=1` is present.
 import { db, ensureSignedIn } from './firebase-config.js';
-import { executivePowerFor } from './game-logic.js';
+import { executivePowerFor, ineligibleChancellorCandidates } from './game-logic.js';
 import {
   ref, get, set, update, remove, onValue,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
@@ -35,6 +35,21 @@ export function initDevBots({ room }) {
 
   const nameOf = uid => (uid && players[uid] && players[uid].name) || (uid ? String(uid).slice(0, 8) : '?');
 
+  let peekUnsub = null;
+  let peekRound = null;
+  // The board writes secret/executive/{round}/policyPeek AFTER the meta flip
+  // to executive_action, so a bot tick driven only by meta/players can read
+  // too early, see nothing, and never retry (nothing else changes after).
+  // Watch the peek node itself so the ack fires when the peek arrives.
+  function watchPeek(roundId) {
+    if (roundId === peekRound) return;
+    if (typeof peekUnsub === 'function') { try { peekUnsub(); } catch (_) { /* ignore */ } }
+    peekUnsub = null;
+    peekRound = roundId;
+    if (roundId === null || roundId === undefined) return;
+    peekUnsub = onValue(at(`secret/executive/${roundId}/policyPeek`), () => react());
+  }
+
   function react() {
     if (busy) { queued = true; return; }
     busy = true;
@@ -52,10 +67,34 @@ export function initDevBots({ room }) {
     const phase = meta.phase;
     const roundId = meta.roundId;
 
+    if (phase === 'night') {
+      // Bots have no phones: the host acks their night reveal directly.
+      const snap = await get(at('players'));
+      const all = snap.val() || {};
+      const missing = bots().filter(uid => all[uid] && all[uid].roleSeen !== true);
+      if (missing.length) {
+        await sleep(800);
+        const updates = {};
+        missing.forEach(uid => { updates[`players/${uid}/roleSeen`] = true; });
+        await update(ref(db, `games/${room}`), updates);
+      }
+      return;
+    }
+
     if (phase === 'nomination' && bots().includes(meta.presidentUid) && !meta.chancellorCandidateUid) {
       const key = `nom-${roundId}`;
+      // If a previous pick was rejected (board clears illegal nominees),
+      // drop the spent key so the next tick repicks. Retries only happen
+      // on fresh meta/players events, so this can't hot-loop.
+      if (acted.has(key)) acted.delete(key);
       if (!acted.has(key)) {
-        const opts = living().filter(uid => uid !== meta.presidentUid);
+        // Mirror the board's term-limit rules so the pick is always legal.
+        const inelig = ineligibleChancellorCandidates({
+          lastPresidentUid: meta.presidentUidLast,
+          lastChancellorUid: meta.chancellorUidLast,
+          aliveCount: living().length,
+        });
+        const opts = living().filter(uid => uid !== meta.presidentUid && !inelig.has(uid));
         if (opts.length) {
           await sleep(800);
           await update(at('meta'), { chancellorCandidateUid: pick(opts) });
@@ -268,7 +307,7 @@ export function initDevBots({ room }) {
   async function main() {
     const user = await ensureSignedIn();
     myUid = user.uid;
-    onValue(at('meta'), snap => { meta = snap.val() || {}; react(); });
+    onValue(at('meta'), snap => { meta = snap.val() || {}; watchPeek(meta.roundId); react(); });
     onValue(at('players'), snap => { players = snap.val() || {}; react(); });
 
     const fill5 = document.getElementById('devFill5');

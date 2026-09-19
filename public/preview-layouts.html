@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<!-- DEV-ONLY layout gallery — DELETE before game night (see README checklist).
+     Frames preview-fit.html (the static board mirror) at several host screen
+     sizes, at 1:1 pixels inside each frame, so "does the board fit on this
+     screen" is answerable without owning the screen.
+
+     Each tile is a real iframe of the harness at the host's exact pixel size,
+     scaled down to fit the card. Because both pages are same-origin, the tile
+     reads that frame's own fit readout back out — tier, scale and whether
+     anything is clipped — so the numbers below each frame are the frame's, not
+     a second guess. If opened over file:// the readout may be blocked by the
+     browser; the frames still render. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Secret Hitler — Layout Preview (dev only)</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  body.gallery { padding: 20px 24px 60px; }
+  .gallery-head { max-width: 1100px; }
+  .gallery-head h1 { font-size: 26px; }
+  .gallery-controls {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end;
+    margin: 14px 0 6px; padding: 14px 16px;
+    background: var(--panel);
+    border: 2px solid #000; outline: 1px solid var(--border);
+    box-shadow: var(--shadow-hard);
+  }
+  .gallery-controls .group { display: flex; flex-direction: column; gap: 4px; }
+  .gallery-controls .group > span {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .gallery-controls .row { display: flex; gap: 6px; }
+  .gallery-controls button { width: auto; padding: 7px 12px; font-size: 12px; }
+  .gallery-controls button.active { outline: 2px solid #fff; outline-offset: 1px; }
+  .gallery-controls input { width: 84px; margin: 0; padding: 6px; font-size: 14px; }
+  .gallery-controls .custom { display: flex; gap: 6px; align-items: center; }
+  .legend { font-size: 13px; color: var(--muted); max-width: 1100px; margin: 10px 0 22px; font-style: italic; }
+  .frames {
+    display: grid; gap: 26px;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    align-items: start;
+  }
+  .frame { margin: 0; }
+  .screen {
+    position: relative; overflow: hidden; background: #000;
+    border: 2px solid #000; outline: 1px solid var(--border);
+    box-shadow: var(--shadow-hard);
+  }
+  .screen iframe { border: 0; display: block; transform-origin: top left; background: var(--bg); }
+  .frame figcaption { margin-top: 8px; font-size: 14px; }
+  .frame .size { font-family: var(--font-mono); color: var(--accent); letter-spacing: 0.06em; }
+  .frame .kind { color: var(--muted); }
+  .frame .readout {
+    display: block; margin-top: 4px; font-family: var(--font-mono);
+    font-size: 12px; color: var(--muted); white-space: pre-wrap;
+  }
+  .frame .readout .ok { color: #6fd68b; }
+  .frame .readout .bad { color: #ff8080; }
+  .frame.wide-card { grid-column: 1 / -1; }
+</style>
+</head>
+<body class="gallery">
+  <div class="gallery-head">
+    <h1>Layout preview <span class="muted">— dev only</span></h1>
+    <p class="muted">Each tile is the board rendered at that host screen's exact
+      pixel size, scaled down to fit here. The numbers under a frame come from
+      that frame, read back out of it: which stage tier the host aspect picked,
+      the scale applied, and whether anything ended up clipped.</p>
+  </div>
+
+  <div class="gallery-controls">
+    <div class="group">
+      <span>Players</span>
+      <div class="row" id="playersRow">
+        <button data-v="5">5</button>
+        <button data-v="7">7</button>
+        <button data-v="10" class="active">10</button>
+      </div>
+    </div>
+    <div class="group">
+      <span>Phase</span>
+      <div class="row" id="phaseRow">
+        <button data-v="night" class="active">night</button>
+        <button data-v="election">election</button>
+        <button data-v="gameover">gameover</button>
+      </div>
+    </div>
+    <div class="group">
+      <span>Layout tier</span>
+      <div class="row" id="layoutRow">
+        <button data-v="auto" class="active">auto</button>
+        <button data-v="wide">wide</button>
+        <button data-v="tall">tall</button>
+      </div>
+    </div>
+    <div class="group">
+      <span>Host tools</span>
+      <div class="row" id="toolsRow">
+        <button data-v="hidden" class="active">hidden</button>
+        <button data-v="shown">shown</button>
+      </div>
+    </div>
+    <div class="group">
+      <span>Custom host size</span>
+      <div class="custom">
+        <input id="customW" type="number" value="1024" min="320" max="7680" inputmode="numeric" />
+        <span class="muted">×</span>
+        <input id="customH" type="number" value="768" min="240" max="4320" inputmode="numeric" />
+        <button id="customGo" class="secondary">Replace the last tile</button>
+      </div>
+    </div>
+    <div class="group">
+      <span>&nbsp;</span>
+      <div class="row">
+        <button id="reloadAll">Reload all</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="legend">Slack is the leftover room on each axis after scaling — the
+    letterbox, not a bug. “clipped: no” on every tile is the thing to check: it
+    means the whole scene is inside the screen with no scrollbar anywhere.</p>
+
+  <div class="frames" id="frames"></div>
+
+<script>
+// The host screens worth checking, smallest to largest. aspect decides which
+// stage tier the harness picks on its own; the tier is printed per tile so a
+// wrong automatic choice is visible rather than assumed.
+var HOSTS = [
+  { w: 1920, h: 1080, kind: '1080p TV / projector — the default target' },
+  { w: 3840, h: 2160, kind: '4K TV' },
+  { w: 2560, h: 1080, kind: 'ultrawide' },
+  { w: 1366, h: 768, kind: 'common laptop window' },
+  { w: 1280, h: 800, kind: '16:10 laptop' },
+  { w: 1024, h: 768, kind: '4:3 projector' },
+  { w: 800, h: 600, kind: 'old projector' },
+  { w: 1080, h: 1920, kind: 'portrait / rotated display' },
+  { w: 1024, h: 768, kind: 'custom size (edit above)' }
+];
+
+var state = { players: '10', phase: 'night', layout: 'auto', tools: 'hidden' };
+
+function harnessUrl() {
+  return 'preview-fit.html?players=' + state.players +
+    '&phase=' + state.phase +
+    '&layout=' + state.layout +
+    '&tools=' + state.tools;
+}
+
+function buildTiles() {
+  var host = document.getElementById('frames');
+  host.innerHTML = HOSTS.map(function (h, i) {
+    return '<figure class="frame" data-i="' + i + '">' +
+      '<div class="screen"><iframe title="board at ' + h.w + 'x' + h.h + '" ' +
+        'width="' + h.w + '" height="' + h.h + '" src="' + harnessUrl() + '"></iframe></div>' +
+      '<figcaption><span class="size">' + h.w + '&times;' + h.h + '</span> ' +
+        '<span class="kind">' + h.kind + '</span>' +
+        '<span class="readout">…</span></figcaption></figure>';
+  }).join('');
+}
+
+// Scale each frame down to its card and read that frame's own numbers back out.
+function layoutTiles() {
+  document.querySelectorAll('.frame').forEach(function (frame) {
+    var screen = frame.querySelector('.screen');
+    var iframe = frame.querySelector('iframe');
+    var w = parseInt(iframe.getAttribute('width'), 10);
+    var h = parseInt(iframe.getAttribute('height'), 10);
+    var cardW = screen.clientWidth || 380;
+    var k = cardW / w;
+    iframe.style.transform = 'scale(' + k + ')';
+    screen.style.height = Math.round(h * k) + 'px';
+  });
+}
+
+function readTiles() {
+  document.querySelectorAll('.frame').forEach(function (frame) {
+    var iframe = frame.querySelector('iframe');
+    var out = frame.querySelector('.readout');
+    var txt = null;
+    try {
+      var doc = iframe.contentDocument;
+      var node = doc && doc.getElementById('previewReadout');
+      txt = node && node.textContent;
+    } catch (e) { txt = null; }
+    if (!txt || txt === '…') {
+      out.textContent = '(readout blocked by the browser — resize the tile window to judge)';
+      return;
+    }
+    // Keep only the lines that answer the question: tier, scale, clipping.
+    var lines = txt.split('\n').filter(function (l) {
+      return /^(tier|scale|slack|clipped)/.test(l);
+    });
+    var clipped = /clipped\s+no/.test(txt);
+    out.innerHTML = lines.map(function (l) { return esc(l); }).join('\n')
+      .replace(/clipped\s+no/, 'clipped <span class="ok">no</span>')
+      .replace(/clipped\s+YES.*/, 'clipped <span class="bad">YES — BUG</span>');
+    if (!clipped) out.classList.add('has-bug');
+  });
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function reloadAll() {
+  document.querySelectorAll('.frame').forEach(function (frame, i) {
+    var iframe = frame.querySelector('iframe');
+    iframe.src = harnessUrl();
+    iframe.addEventListener('load', function () {
+      layoutTiles();
+      setTimeout(function () { layoutTiles(); readTiles(); }, 350);
+    }, { once: true });
+  });
+}
+
+function wireRow(id, key) {
+  var row = document.getElementById(id);
+  row.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    state[key] = b.dataset.v;
+    row.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+    reloadAll();
+  });
+}
+
+wireRow('playersRow', 'players');
+wireRow('phaseRow', 'phase');
+wireRow('layoutRow', 'layout');
+wireRow('toolsRow', 'tools');
+
+// Custom host size: applied to the last tile (a spare 1024x768 slot), so the
+// fixed presets stay comparable while a real screen can be dialled in.
+document.getElementById('customGo').addEventListener('click', function () {
+  var w = Math.max(320, Math.min(7680, parseInt(document.getElementById('customW').value, 10) || 1024));
+  var h = Math.max(240, Math.min(4320, parseInt(document.getElementById('customH').value, 10) || 768));
+  var frame = document.querySelector('.frame[data-i="' + (HOSTS.length - 1) + '"]');
+  if (!frame) return;
+  frame.querySelector('.size').innerHTML = w + '&times;' + h;
+  frame.querySelector('.kind').textContent = 'custom size';
+  frame.querySelector('iframe').setAttribute('width', w);
+  frame.querySelector('iframe').setAttribute('height', h);
+  reloadAll();
+});
+
+document.getElementById('reloadAll').addEventListener('click', reloadAll);
+window.addEventListener('resize', layoutTiles);
+
+buildTiles();
+document.querySelectorAll('.frame iframe').forEach(function (iframe) {
+  iframe.addEventListener('load', function () {
+    layoutTiles();
+    setTimeout(function () { layoutTiles(); readTiles(); }, 400);
+  });
+});
+layoutTiles();
+readTiles();
+</script>
+</body>
+</html>

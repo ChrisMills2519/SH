@@ -35,6 +35,11 @@
     border: 2px solid #444;
     border-radius: 24px;
     overflow: hidden;
+    /* The role menu is position: fixed in the real app. A transform makes this
+       frame the containing block for fixed descendants, so the overlay covers
+       the simulated phone instead of the whole browser window. */
+    position: relative;
+    transform: translateZ(0);
     /* No transition: the readout measures the frame synchronously, and a
        transitioning max-width would leave it reporting a stale width. */
     background: var(--bg);
@@ -76,6 +81,7 @@
       <button data-s="waiting">waiting for host</button>
       <button data-s="reveal" class="active">night reveal (tap card)</button>
       <button data-s="idle">idle role + team</button>
+      <button data-s="menu">my role menu (overlay)</button>
       <button data-s="nomination">nomination (president)</button>
       <button data-s="vote">election vote</button>
       <button data-s="pres">legislation president</button>
@@ -98,7 +104,7 @@
       <button id="toolsToggle">hide tools (H)</button>
     </div>
     <div id="previewReadout">…</div>
-    <p class="muted">Note: the frame simulates width only — media queries follow the real window, so also resize the window / use devtools device toolbar for a true check.</p>
+    <p class="muted">Note: the frame simulates width only — media queries follow the real window, so also resize the window / use devtools device toolbar for a true check. Role menu: tap “🎴 My role”, or pick the <em>my role menu</em> screen; it closes on ✕, on a backdrop tap, and on Esc.</p>
   </aside>
 
   <div id="stage">
@@ -107,9 +113,23 @@
       <!-- MIRROR of play.html body (same structure, static demo content). -->
       <div class="board-wrap" style="max-width:480px">
         <p class="muted" id="ppStatus"></p>
-        <button id="ppSoundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+        <!-- MIRROR of play.html: the topbar, where "My role" re-opens the card
+             on every phase. -->
+        <div class="play-topbar">
+          <button id="ppSoundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+          <button id="ppRoleMenuBtn" class="sound-toggle" type="button">🎴 My role</button>
+        </div>
         <p class="muted" id="ppPin" style="display:none"></p>
         <div id="ppMain"></div>
+      </div>
+      <!-- MIRROR of play.html #roleMenu, inside the frame so it is clipped to
+           the simulated device (see the transform note above). No 20s
+           autoclose here — that would fight you while you're looking at it. -->
+      <div id="ppRoleMenu" class="role-menu" role="dialog" aria-modal="true" aria-label="Your secret role" style="display:none">
+        <div class="role-menu-sheet">
+          <button id="ppRoleMenuClose" class="sound-toggle role-menu-close" type="button">✕ Close</button>
+          <div id="ppRoleMenuBody"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -117,10 +137,12 @@
 <script>
 // MIRROR of play.js render paths (static demo data, no Firebase).
 var NAMES = ['Anja', 'Boris', 'Clara', 'Dmitri', 'Elsa', 'Fritz', 'Greta'];
+// mates mirrors secret/knownTeammates/{uid} in the database: a flat name list
+// with no role attached (a Fascist's list holds the other Fascists AND Hitler).
 var ROLES = {
-  liberal: { img: 'role-liberal', label: 'Liberal', team: '' },
-  fascist: { img: 'role-fascist', label: 'Fascist', team: 'Your team: Boris, Clara' },
-  hitler: { img: 'role-hitler', label: 'Hitler', team: 'Your team: Boris' }
+  liberal: { img: 'role-liberal', label: 'Liberal', team: '', mates: [] },
+  fascist: { img: 'role-fascist', label: 'Fascist', team: 'Your team: Boris, Clara', mates: ['Boris', 'Clara'] },
+  hitler: { img: 'role-hitler', label: 'Hitler', team: 'Your team: Boris', mates: ['Boris'] }
 };
 var screen = 'reveal';
 var role = 'fascist';
@@ -161,6 +183,13 @@ var SCREENS = {
       '<p class="role-caption">Tap to reveal your role — shield your screen</p>' +
       '<p>Night falls — reveal your role, then hide it again.</p>';
   } },
+  // The overlay over live action UI — the point of the menu is that it is
+  // reachable mid-phase, so this screen is deliberately not the idle one.
+  menu: { status: 'Phase: nomination', pin: true, html:
+    '<h2>Nominate a Chancellor</h2>' +
+    ['Boris', 'Clara', 'Dmitri', 'Elsa', 'Fritz'].map(function (n) {
+      return '<button type="button" class="nominateBtn">' + esc(n) + '</button>';
+    }).join('') },
   idle: { status: 'Phase: nomination', pin: true, html: function () {
     var team = ROLES[role].team ? '<p class="muted">' + esc(ROLES[role].team) + '</p>' : '';
     return '<img class="role-img" src="img/' + ROLES[role].img + '.png" alt="' + ROLES[role].label + '" />' +
@@ -231,8 +260,54 @@ var SCREENS = {
     '<div class="role-banner liberal">Liberals win!</div>' }
 };
 
+// MIRROR of roleMenuHtml() in js/play.js — same copy, same structure. Kept in
+// sync by design: if the wording changes there, change it here, or the check in
+// scripts/check-role-menu.js will fail.
+function roleMenuHtml() {
+  var label = role === 'hitler' ? 'Hitler' : role[0].toUpperCase() + role.slice(1);
+  var img = role === 'hitler' ? 'role-hitler' : 'role-' + role;
+  var mates = ROLES[role].mates || [];
+  var team;
+  if (mates.length) {
+    var heading = role === 'hitler' ? 'Your Fascists' : 'Your allies';
+    var note = role === 'hitler'
+      ? 'These Fascists know who you are.'
+      : 'Fascists and Hitler. The app lists them together — it does not mark which is Hitler.';
+    team = '<p class="role-menu-team">' + heading + '</p>' +
+      '<p class="role-menu-names">' + mates.map(esc).join('<br />') + '</p>' +
+      '<p class="muted">' + note + '</p>';
+  } else {
+    team = '<p class="muted">' + (role === 'hitler'
+      ? 'In a 7–10 player game Hitler knows no one — the Fascists know you.'
+      : 'You know nobody. Read the table, not the cards.') + '</p>';
+  }
+  return '<img class="role-img" src="img/' + img + '.png" alt="' + label + '" />' +
+    '<p class="role-caption">' + label + '</p>' + team +
+    '<p class="role-menu-shield">Shield your screen</p>';
+}
+
+function openRoleMenu() {
+  document.getElementById('ppRoleMenuBody').innerHTML = roleMenuHtml();
+  document.getElementById('ppRoleMenu').style.display = 'flex';
+}
+
+function closeRoleMenu() {
+  document.getElementById('ppRoleMenu').style.display = 'none';
+  document.getElementById('ppRoleMenuBody').innerHTML = '';
+}
+
+(function wireRoleMenu() {
+  var menu = document.getElementById('ppRoleMenu');
+  document.getElementById('ppRoleMenuBtn').addEventListener('click', openRoleMenu);
+  document.getElementById('ppRoleMenuClose').addEventListener('click', closeRoleMenu);
+  menu.addEventListener('click', function (e) { if (e.target === menu) closeRoleMenu(); });
+  window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRoleMenu(); });
+})();
+
 function render() {
   var def = SCREENS[screen];
+  // The overlay lives outside #ppMain, so a screen change has to close it.
+  if (screen === 'menu') openRoleMenu(); else closeRoleMenu();
   document.getElementById('ppStatus').textContent = def.status;
   var pin = document.getElementById('ppPin');
   if (def.pin) {
@@ -289,8 +364,9 @@ function readout() {
   var frame = document.getElementById('deviceFrame');
   var fw = Math.round(frame.getBoundingClientRect().width);
   var over = document.documentElement.scrollWidth > window.innerWidth + 1;
+  var menuOpen = document.getElementById('ppRoleMenu').style.display === 'flex';
   document.getElementById('previewReadout').textContent =
-    'screen ' + screen + ' · role ' + role + '\n' +
+    'screen ' + screen + ' · role ' + role + ' · menu ' + (menuOpen ? 'open' : 'closed') + '\n' +
     'frame ' + fw + 'px · viewport ' + window.innerWidth + 'x' + window.innerHeight + '\n' +
     (over ? 'H-OVERFLOW: page scrolls sideways!' : 'no page-level h-overflow');
 }

@@ -28,12 +28,27 @@ let votesMap = {};
 let votesRevealedFlag = false;
 let extrasRound = null;
 let extrasUnsubs = [];
+let prevSeatState = '';
+// Night-reveal progress mirror (read-only; phones write their own roleSeen).
+let nightAcked = 0;
+let nightTotal = 0;
 
 async function main() {
   const user = await ensureSignedIn();
   myUid = user.uid;
   initSoundToggle();
   initNarratorToggle();
+
+  const fsBtn = el('fullscreenBtn');
+  if (fsBtn) {
+    fsBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+  }
 
   if (isNew) {
     // Claim hostUid first (its rule allows creating an empty room), then
@@ -50,9 +65,30 @@ async function main() {
     });
   }
 
-  const joinUrl = `${location.origin}${location.pathname.replace('board.html', 'play.html')}?room=${room}`;
-  renderQr(joinUrl);
-  el('joinUrl').textContent = joinUrl;
+  // The QR must encode an address phones can reach. location.host is
+  // localhost on local dev (useless to phones), and the browser can't learn
+  // the LAN IP itself — so the host can override it once; it persists.
+  const phoneHostInput = el('phoneHost');
+  if (phoneHostInput) {
+    try { phoneHostInput.value = localStorage.getItem('sh:phoneHost') || ''; } catch (_) { /* ignore */ }
+  }
+  function buildJoinUrl() {
+    let host = location.host;
+    const override = (phoneHostInput && phoneHostInput.value || '').trim()
+      .replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+    if (override) host = override;
+    return `${location.protocol}//${host}${location.pathname.replace('board.html', 'play.html')}?room=${room}`;
+  }
+  function refreshJoin() {
+    const joinUrl = buildJoinUrl();
+    renderQr(joinUrl);
+    el('joinUrl').textContent = joinUrl;
+  }
+  refreshJoin();
+  if (phoneHostInput) phoneHostInput.addEventListener('input', () => {
+    try { localStorage.setItem('sh:phoneHost', phoneHostInput.value.trim()); } catch (_) { /* ignore */ }
+    refreshJoin();
+  });
   el('roomCode').textContent = room;
 
   onValue(ref(db, `games/${room}/players`), snap => {
@@ -86,7 +122,55 @@ async function main() {
     render();
   }, () => {});
 
+  // Seat reclaim (reconnect PIN) runs for the whole session — lobby too — so
+  // it's installed once here, not phase-gated like the legislative watchers.
+  watchForReclaimRequests();
+
   el('startBtn').addEventListener('click', startGame);
+
+  // Stage fitting. Re-run whenever the space the stage has to live in changes:
+  // a window resize, a fullscreen toggle, a projector resolution switch, the
+  // host tools appearing (they are in flow, so they shrink the stage viewport)
+  // or the host aspect crossing a tier boundary. Firebase updates re-run it via
+  // render() as well. Everything we set here is a transform plus (at most) one
+  // class toggle, so the observer below cannot feed itself.
+  const refit = () => { try { fitStage(); } catch (_) {} };
+  window.addEventListener('resize', refit);
+  document.addEventListener('fullscreenchange', refit);
+  window.addEventListener('load', refit);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(refit).catch(() => {});
+  }
+  try {
+    const mq = typeof matchMedia === 'function' && matchMedia('(min-aspect-ratio: 3/2)');
+    if (mq && mq.addEventListener) mq.addEventListener('change', refit);
+  } catch (_) {}
+  // Observe the *viewport*, not the table: an interior swap (more seats, a
+  // phase change, an enactment) no longer changes the scene's size, and the
+  // table's own box is oversized and scaled, so watching it would let it
+  // measure its own result. rAF-coalesced so a burst of swaps fits once.
+  try {
+    if (typeof ResizeObserver === 'function') {
+      let fitQueued = false;
+      const ro = new ResizeObserver(() => {
+        if (fitQueued) return;
+        fitQueued = true;
+        requestAnimationFrame(() => {
+          fitQueued = false;
+          refit();
+        });
+      });
+      const vp = el('stageFit');
+      if (vp) ro.observe(vp);
+    }
+  } catch (_) {}
+  // Fit immediately rather than waiting for the first Firebase render: the
+  // lobby is hidden, but a reload straight into a live game is not.
+  refit();
+  const nightSkipBtn = el('nightSkipBtn');
+  if (nightSkipBtn) nightSkipBtn.addEventListener('click', () => {
+    skipNight().catch(e => console.warn('[board] skip-night failed:', e && e.message));
+  });
   el('forceResolveBtn').addEventListener('click', () => {
     forceResolveElection().catch(e => console.warn('[board] force-resolve failed:', e && e.message));
   });
@@ -95,6 +179,23 @@ async function main() {
   if (new URLSearchParams(location.search).get('dev') === '1') {
     const devPanel = document.getElementById('devPanel');
     if (devPanel) devPanel.style.display = 'block';
+    try { document.body.classList.add('dev'); } catch (_) {}
+    // DEV-ONLY hide toggle (H): true game look while testing fit.
+    const setDevHidden = hidden => {
+      try {
+        document.body.classList.toggle('dev-tools-hidden', hidden);
+        const b = document.getElementById('devHideBtn');
+        if (b) b.textContent = hidden ? 'Show (H)' : 'Hide (H)';
+        fitStage();
+      } catch (_) {}
+    };
+    const hideBtn = document.getElementById('devHideBtn');
+    if (hideBtn) hideBtn.addEventListener('click', () => setDevHidden(!document.body.classList.contains('dev-tools-hidden')));
+    window.addEventListener('keydown', e => {
+      if ((e.key === 'h' || e.key === 'H') && !/INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) {
+        setDevHidden(!document.body.classList.contains('dev-tools-hidden'));
+      }
+    });
     import('./dev-bots.js').then(m => m.initDevBots({ room })).catch(e => console.warn('[devbots] load failed', e));
   }
   // --- DEV-ONLY END ---
@@ -104,7 +205,10 @@ async function main() {
 // Lobby -> role assignment
 // ---------------------------------------------------------------------------
 async function startGame() {
+  // Retired seats (old uids left behind by a reconnect) never start: they
+  // hold no living player, only a tombstone for the render loop to skip.
   const playerList = Object.entries(currentPlayers)
+    .filter(([, p]) => p && p.retired !== true)
     .map(([uid, p]) => ({ uid, name: p.name, joinedAt: p.joinedAt || 0 }))
     .sort((a, b) => a.joinedAt - b.joinedAt);
 
@@ -121,6 +225,10 @@ async function startGame() {
     updates[`secret/roles/${p.uid}`] = roles[p.uid];
     updates[`secret/knownTeammates/${p.uid}`] = knownTeammates[p.uid];
     updates[`players/${p.uid}/alive`] = true;
+    // Night-phase reveal ack: cleared for every seat so the new game blocks
+    // in `night` until each player taps their role card (see watchForNightAcks).
+    // Null (not false) keeps Firebase `!data.exists()` write-once semantics tidy.
+    updates[`players/${p.uid}/roleSeen`] = null;
   });
   updates['secret/deck'] = deck;
   updates['secret/discard'] = [];
@@ -135,6 +243,11 @@ async function startGame() {
   updates['votes'] = null;
   updates['votesCast'] = null;
   updates['votesRevealed'] = null;
+  // Stale seat-reclaim intents don't carry into a new game (re-file in the
+  // new lobby if still needed). Reconnect PINs and retired tombstones are
+  // uid-bound history and intentionally survive: same-browser players keep
+  // their codes across games.
+  updates['reclaimRequests'] = null;
   updates['meta/playerOrder'] = playerList.map(p => p.uid);
   updates['meta/presidentUid'] = playerList[0].uid;
   updates['meta/presidentUidLast'] = null;
@@ -145,7 +258,12 @@ async function startGame() {
   updates['meta/liberalTrack'] = 0;
   updates['meta/fascistTrack'] = 0;
   updates['meta/roundId'] = 0;
-  updates['meta/phase'] = 'nomination';
+  // Synced night reveal: the game opens in `night` (private tap-to-reveal on
+  // each phone) and only advances to `nomination` once every living player
+  // has acked (watchForNightAcks) or the host skips. Previously this jumped
+  // straight to `nomination`, letting the first president nominate while
+  // others hadn't seen their roles yet.
+  updates['meta/phase'] = 'night';
   updates['meta/pendingPower'] = null;
   updates['meta/executionTarget'] = null;
   updates['meta/investigateTarget'] = null;
@@ -155,12 +273,8 @@ async function startGame() {
   await update(ref(db, `games/${room}`), updates);
   playSound('game-start');
   resetNarratorKeys();
-  narrate('narr_01');
-  narrate('narr_02');
-  narrate('narr_03');
-  narrate('narr_04');
-  narrate('narr_05');
-  narrate('narr_06');
+  // Opening narration now fires from handlePhaseEnter('night') (via the meta
+  // listener) so a board refresh mid-night still narrates instead of going silent.
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +289,16 @@ function handlePhaseEnter(phase) {
     const m = currentMeta;
     return m.phase === p && (m.roundId || 0) === r;
   };
+  if (phase === 'night') {
+    watchForNightAcks();
+    narrateOnce('night-01', 'narr_01');
+    narrate('narr_02');
+    narrate('narr_03');
+    narrate('narr_04');
+    narrate('narr_05');
+    narrate('narr_06');
+    narrateDelayed(`night-wait`, 'narr_10', 25000, () => (currentMeta.phase === 'night'));
+  }
   if (phase === 'nomination') {
     watchForNomination();
     narrateOnce(`nom-${roundId}`, 'narr_07');
@@ -241,7 +365,9 @@ function watchForVetoRequest(roundId) {
 }
 
 function alivePlayers() {
-  return (currentMeta.playerOrder || []).filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false);
+  // Retired seats (reclaimed by a reconnect) are gone from playerOrder, but
+  // belt-and-braces: never count one toward quorums or candidacies.
+  return (currentMeta.playerOrder || []).filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false && currentPlayers[uid].retired !== true);
 }
 
 // Replay guard: Firebase re-fires watchers with already-completed state on
@@ -272,6 +398,63 @@ async function claim(key) {
   }
 }
 
+function watchForNightAcks() {
+  // Synced opening reveal: phones ack by writing players/{uid}/roleSeen=true
+  // when they tap their role card. Auto-advance to nomination at full quorum;
+  // the host can skip early via nightSkipBtn (same single-flight claim key).
+  const entryRound = currentMeta.roundId || 0;
+  let done = false;
+  let unsub = null;
+  const check = async snap => {
+    if (done) return;
+    // Host skipped or quorum already advanced us: retire this watcher so it
+    // doesn't re-fire (and re-claim) on every players change for the rest
+    // of the game.
+    if (currentMeta.phase && currentMeta.phase !== 'night') {
+      done = true;
+      if (typeof unsub === 'function') unsub();
+      return;
+    }
+    const players = snap.val() || {};
+    const order = (currentMeta.playerOrder || []).filter(uid =>
+      players[uid] && players[uid].alive !== false && players[uid].retired !== true);
+    const acked = order.filter(uid => players[uid] && players[uid].roleSeen === true);
+    nightAcked = acked.length;
+    nightTotal = order.length;
+    render();
+    if (!order.length || acked.length < order.length) return;
+    const m = await freshMeta();
+    if (m.phase !== 'night' || (m.roundId || 0) !== entryRound) return;
+    if (!(await claim('night-done'))) return;
+    done = true;
+    if (typeof unsub === 'function') unsub();
+    await advanceFromNight();
+  };
+  unsub = onValue(ref(db, `games/${room}/players`), check);
+}
+
+// Night -> nomination. Single-flight callers: full-quorum auto-advance and
+// the host skip button share the `night-done` claim, so exactly one wins.
+async function advanceFromNight() {
+  const m = await freshMeta();
+  if (m.phase !== 'night') return;
+  narrate('narr_06');
+  await update(metaRef, { chancellorCandidateUid: null, phase: 'nomination' });
+}
+
+async function skipNight() {
+  const m = await freshMeta();
+  if (m.phase !== 'night') {
+    console.warn('[board] skip-night ignored: not in night');
+    return;
+  }
+  if (!(await claim('night-done'))) {
+    console.warn('[board] skip-night ignored: night already claimed');
+    return;
+  }
+  await advanceFromNight();
+}
+
 function watchForNomination() {
   // NB: onValue can invoke the callback synchronously with cached data,
   // before `unsub` is assigned — hence the done-flag + guarded unsub.
@@ -289,7 +472,7 @@ function watchForNomination() {
     // the candidate and staying subscribed for a corrected nomination.
     // (Claim only after validation, so the retry isn't blocked by our claim.)
     const order = m.playerOrder || [];
-    const aliveCount = order.filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false).length;
+    const aliveCount = order.filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false && currentPlayers[uid].retired !== true).length;
     const ineligible = ineligibleChancellorCandidates({
       lastPresidentUid: m.presidentUidLast,
       lastChancellorUid: m.chancellorUidLast,
@@ -354,7 +537,7 @@ async function forceResolveElection() {
   await set(ref(db, `games/${room}/votesRevealed/${roundId}`), true);
   const votesSnap = await get(ref(db, `games/${room}/votes/${roundId}`));
   const votes = votesSnap.val() || {};
-  const aliveCount = (m.playerOrder || []).filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false).length;
+  const aliveCount = (m.playerOrder || []).filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false && currentPlayers[uid].retired !== true).length;
   const jaCount = Object.values(votes).filter(v => v === 'ja').length;
   await resolveElection(jaCount > aliveCount / 2, m);
 }
@@ -422,6 +605,14 @@ async function runChaos(fresh) {
   playSound('chaos');
   narrate('narr_17');
   narrate('narr_18');
+  // Chaos flash overlay on the table
+  const table = el('table');
+  if (table) {
+    table.classList.remove('chaos-flash');
+    void table.offsetWidth; // reflow to restart animation
+    table.classList.add('chaos-flash');
+    setTimeout(() => table.classList.remove('chaos-flash'), 1100);
+  }
   const drawn = await takeTiles(1);
   const tile = drawn[0];
   const trackField = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
@@ -647,12 +838,20 @@ function watchForChancellorEnact() {
     const tile = hand[idx];
     await appendToDiscard(hand.filter((_, i) => i !== idx));
     playSound(tile === 'liberal' ? 'enact-liberal' : 'enact-fascist');
-    narrateEnactment(tile, (m[field] || 0) + 1);
+    // Board glow flash on enactment
+    const boardEl = tile === 'liberal' ? el('liberalBoard') : el('fascistBoard');
+    if (boardEl) {
+      boardEl.classList.remove('just-enacted-liberal', 'just-enacted-fascist');
+      void boardEl.offsetWidth;
+      boardEl.classList.add(tile === 'liberal' ? 'just-enacted-liberal' : 'just-enacted-fascist');
+      setTimeout(() => boardEl.classList.remove('just-enacted-liberal', 'just-enacted-fascist'), 700);
+    }
+    const field = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
+    const newVal = (m[field] || 0) + 1;
+    narrateEnactment(tile, newVal);
     await update(ref(db, `games/${room}`), {
       [`secret/legislative/${roundId}/enactedTile`]: tile,
     });
-    const field = tile === 'liberal' ? 'liberalTrack' : 'fascistTrack';
-    const newVal = (m[field] || 0) + 1;
     // Veto unlocks permanently once the 5th fascist policy is enacted.
     const unlock = field === 'fascistTrack' && vetoUnlocked(newVal);
     await update(metaRef, { [field]: newVal, ...(unlock ? { vetoUnlocked: true } : {}) });
@@ -754,6 +953,15 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'execution') return;
+      // Server-side target validation: phones filter the list, but a stale or
+      // forged client can send self/dead/unknown. Reject and stay subscribed.
+      // (Validate before claiming, so the retry isn't blocked by our claim.)
+      const targetAlive = currentPlayers[target] && currentPlayers[target].alive !== false;
+      if (!targetAlive || target === m.presidentUid) {
+        console.warn(`[board] rejecting invalid execution target ${target}, waiting for a legal one`);
+        await update(metaRef, { executionTarget: null });
+        return;
+      }
       if (!(await claim(`power-${roundId}`))) return;
       done = true;
       if (typeof unsub === 'function') unsub();
@@ -780,6 +988,14 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'investigate_loyalty') return;
+      // Official rule: no self-investigation, living players only, never twice.
+      const targetAlive = currentPlayers[target] && currentPlayers[target].alive !== false;
+      const alreadyInvestigated = m.investigatedUids && m.investigatedUids[target] === true;
+      if (!targetAlive || target === m.presidentUid || alreadyInvestigated) {
+        console.warn(`[board] rejecting invalid investigate target ${target}, waiting for a legal one`);
+        await update(metaRef, { investigateTarget: null });
+        return;
+      }
       if (!(await claim(`power-${roundId}`))) return;
       done = true;
       if (typeof unsub === 'function') unsub();
@@ -807,6 +1023,13 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'special_election') return;
+      // Official rule: any other living player (never self, never dead).
+      const targetAlive = currentPlayers[target] && currentPlayers[target].alive !== false;
+      if (!targetAlive || target === m.presidentUid) {
+        console.warn(`[board] rejecting invalid special-election target ${target}, waiting for a legal one`);
+        await update(metaRef, { specialElectionTarget: null });
+        return;
+      }
       if (!(await claim(`power-${roundId}`))) return;
       done = true;
       if (typeof unsub === 'function') unsub();
@@ -859,6 +1082,196 @@ async function watchForExecutiveAction() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Seat reclaim (reconnect PIN).
+// A phone whose browser storage was cleared (or a new device) gets a fresh
+// uid with no standing. It files reclaimRequests/{newUid} = {name, pin};
+// the host — the only reader of secret/reconnectPins — matches PIN + name
+// to an old seat and migrates old uid -> new uid in one host-authorized
+// update. Same conventions as the phase watchers: single-flight via
+// claim(), re-validate against fresh reads, replay-safe. Mid-action seats
+// (President/Chancellor/nominee) need no special-casing: every gate reads
+// through meta, so the swapped uid just resumes once the update lands.
+// ---------------------------------------------------------------------------
+const reclaimInflight = new Set();
+
+function watchForReclaimRequests() {
+  onValue(ref(db, `games/${room}/reclaimRequests`), snap => {
+    const reqs = snap.val() || {};
+    for (const [newUid, req] of Object.entries(reqs)) {
+      if (!req || req.status || reclaimInflight.has(newUid)) continue;
+      reclaimInflight.add(newUid);
+      handleReclaim(newUid, req).finally(() => reclaimInflight.delete(newUid));
+    }
+  });
+}
+
+async function handleReclaim(newUid, req) {
+  // Single-flight across board tabs/refreshes; losers abort silently.
+  if (!(await claim(`reclaim-${newUid}`))) return;
+  try {
+    const m = await freshMeta();
+    if (m.hostUid !== myUid) return;
+    // Idempotent path: this uid already holds a seat (a previous migration
+    // landed) — approve again so the requester can observe it and move on.
+    const orderNow = Array.isArray(m.playerOrder) ? m.playerOrder : Object.values(m.playerOrder || {});
+    if (orderNow.includes(newUid)) {
+      await approveReclaim(newUid);
+      return;
+    }
+    const gameRoot = ref(db, `games/${room}`);
+    const roundId = m.roundId;
+    const [pinsSnap, playersSnap, rolesSnap, matesSnap, votesSnap, votesCastSnap, revealedSnap] = await Promise.all([
+      get(ref(db, `games/${room}/secret/reconnectPins`)),
+      get(ref(db, `games/${room}/players`)),
+      get(ref(db, `games/${room}/secret/roles`)),
+      get(ref(db, `games/${room}/secret/knownTeammates`)),
+      get(ref(db, `games/${room}/votes`)),
+      get(ref(db, `games/${room}/votesCast`)),
+      // Only the open round's ballots can still move; settled rounds are
+      // history. (roundId is known from freshMeta above.)
+      get(ref(db, `games/${room}/votesRevealed/${roundId}`)),
+    ]);
+    const pins = pinsSnap.val() || {};
+    const players = playersSnap.val() || {};
+    // This uid already carries a PIN (migration landed, stale request).
+    if (pins[newUid] !== undefined && pins[newUid] !== null) {
+      await approveReclaim(newUid);
+      return;
+    }
+    // Match on BOTH pin and name: 4 digits alone would collide too easily.
+    // Retired seats can't be reclaimed twice (first-come wins); the
+    // requester itself is never a candidate. Zero or ambiguous matches
+    // reject — never guess a seat.
+    const norm = s => String(s || '').trim().toLowerCase();
+    const candidates = Object.keys(pins).filter(oldUid => {
+      if (oldUid === newUid) return false;
+      if (String(pins[oldUid]) !== String(req.pin)) return false;
+      const p = players[oldUid];
+      if (!p || p.retired === true) return false;
+      return norm(p.name) === norm(req.name);
+    });
+    if (candidates.length !== 1) {
+      await rejectReclaim(newUid);
+      return;
+    }
+    const oldUid = candidates[0];
+
+    const updates = {};
+    // Secrets move to fresh nodes, so the existing "!data.exists()"
+    // host-write rules already permit the copies — no relaxation needed.
+    const roles = rolesSnap.val() || {};
+    if (roles[oldUid] !== undefined && roles[oldUid] !== null) {
+      updates[`secret/roles/${newUid}`] = roles[oldUid];
+    }
+    const mates = matesSnap.val() || {};
+    if (mates[oldUid] !== undefined && mates[oldUid] !== null) {
+      updates[`secret/knownTeammates/${newUid}`] = mates[oldUid];
+    }
+    // Other players' stored teammate lists are display-only snapshots
+    // ({uid, name}, never looked up by uid), so stale entries there are
+    // harmless and intentionally left alone.
+    updates[`secret/reconnectPins/${newUid}`] = pins[oldUid];
+    updates[`secret/reconnectPins/${oldUid}`] = null;
+    // A dead seat stays dead (alive is host-writable already). A living
+    // seat needs nothing: the client's own players node carries no alive
+    // field, and missing counts as alive.
+    if (players[oldUid] && players[oldUid].alive === false) {
+      updates[`players/${newUid}/alive`] = false;
+    }
+    // Night-reveal ack follows the seat too: a reconnect during the opening
+    // night must not lose an already-tapped reveal (or resurrect a pending one).
+    if (players[oldUid] && players[oldUid].roleSeen === true) {
+      updates[`players/${newUid}/roleSeen`] = true;
+    }
+    // Retire the old node so the board stops rendering it as a live seat
+    // (name/connected are self-write-only, hence the dedicated flag).
+    updates[`players/${oldUid}/retired`] = true;
+    // Every meta reference follows the seat to the new uid.
+    for (const f of ['presidentUid', 'chancellorUid', 'presidentUidLast', 'chancellorUidLast',
+      'chancellorCandidateUid', 'specialElectionReturnUid',
+      'executionTarget', 'investigateTarget', 'specialElectionTarget']) {
+      if (m[f] === oldUid) updates[`meta/${f}`] = newUid;
+    }
+    const order = m.playerOrder;
+    if (Array.isArray(order)) {
+      if (order.includes(oldUid)) updates['meta/playerOrder'] = order.map(u => u === oldUid ? newUid : u);
+    } else if (order && typeof order === 'object') {
+      const copy = { ...order };
+      let touched = false;
+      for (const k of Object.keys(copy)) {
+        if (copy[k] === oldUid) { copy[k] = newUid; touched = true; }
+      }
+      if (touched) updates['meta/playerOrder'] = copy;
+    }
+    if (m.investigatedUids && m.investigatedUids[oldUid] === true) {
+      updates[`meta/investigatedUids/${oldUid}`] = null;
+      updates[`meta/investigatedUids/${newUid}`] = true;
+    }
+    // In-flight ballots move too, so a mid-election reconnect neither loses
+    // the seat's vote nor breaks the quorum count — but only for the
+    // current, unrevealed round. Earlier rounds are settled history; only
+    // the open round's quorum math still reads these keys. The stale oldUid
+    // keys are nulled in the same update: left behind, the orphaned ballot
+    // would double-count in the revealed totals and the orphaned votesCast
+    // entry would push the quorum numerator toward a phantom seat.
+    if (roundId !== null && roundId !== undefined && revealedSnap.val() !== true) {
+      const ballots = (votesSnap.val() || {})[roundId] || {};
+      if (ballots[oldUid] !== undefined && ballots[oldUid] !== null) {
+        if (!ballots[newUid]) updates[`votes/${roundId}/${newUid}`] = ballots[oldUid];
+        updates[`votes/${roundId}/${oldUid}`] = null;
+      }
+      const cast = (votesCastSnap.val() || {})[roundId] || {};
+      if (cast[oldUid] === true) {
+        if (!cast[newUid]) updates[`votesCast/${roundId}/${newUid}`] = true;
+        updates[`votesCast/${roundId}/${oldUid}`] = null;
+      }
+    }
+    // Approve in the same update, once everything else has landed. The
+    // phone deletes its own node on receipt (this sweep is the backstop),
+    // so approval stays observable even if it blinks past offline.
+    updates[`reclaimRequests/${newUid}/status`] = 'approved';
+    await update(gameRoot, updates);
+    sweepReclaim(newUid, 'approved');
+  } catch (e) {
+    // Transient read/write failure: release the claim so a later watcher
+    // fire can retry, and leave the request pending (never dangling — the
+    // next fire picks it up again). Only wrong/ambiguous codes reject.
+    console.warn(`[board] reclaim ${newUid} failed, releasing claim:`, e && e.message);
+    try {
+      await update(ref(db, `games/${room}`), { [`secret/claims/reclaim-${newUid}`]: null });
+    } catch (_) {}
+  }
+}
+
+// Wrong code (or ambiguous match): mark rejected so the requester sees a
+// clear error instead of hanging. The phone deletes its own node on
+// receipt (write-once allows create-or-delete); the sweep below is the
+// backstop for phones that went away before seeing it.
+async function rejectReclaim(newUid) {
+  await update(ref(db, `games/${room}`), { [`reclaimRequests/${newUid}/status`]: 'rejected' });
+  sweepReclaim(newUid, 'rejected');
+}
+
+// Approved requests use the same observable-status protocol (the phone
+// deletes its node on receipt). Sweep either terminal status after a grace
+// period so stale nodes can't accumulate if the phone went away.
+async function approveReclaim(newUid) {
+  await update(ref(db, `games/${room}`), { [`reclaimRequests/${newUid}/status`]: 'approved' });
+  sweepReclaim(newUid, 'approved');
+}
+
+function sweepReclaim(newUid, status) {
+  setTimeout(async () => {
+    try {
+      const cur = (await get(ref(db, `games/${room}/reclaimRequests/${newUid}/status`))).val();
+      if (cur === status) {
+        await update(ref(db, `games/${room}`), { [`reclaimRequests/${newUid}`]: null });
+      }
+    } catch (_) {}
+  }, 60000);
+}
+
 async function endGame(win) {
   playSound(win.winner === 'liberal' ? 'win-liberal' : 'win-fascist');
   if (win.reason === 'five_liberal_policies') narrate('narr_47');
@@ -874,13 +1287,34 @@ async function endGame(win) {
 // ---------------------------------------------------------------------------
 function render() {
   const phase = currentMeta.phase;
-  el('phaseLabel').textContent = phase || '';
+  // Fit-to-screen layout: compact header + overlays apply only in-game, so
+  // the lobby keeps its roomy QR/join layout.
+  try {
+    document.body.classList.toggle('in-game', !!phase && phase !== 'lobby');
+  } catch (_) {}
+  const phaseNames = {
+    lobby: '\uD83C\uDFAE Lobby',
+    night: '\uD83C\uDF19 Night \u2014 reveal your role',
+    nomination: '\uD83C\uDFAD Nomination',
+    election: '\uD83D\uDDF3\uFE0F Election',
+    legislative_president: '\uD83D\uDCDC Legislation \u2014 President',
+    legislative_chancellor: '\uD83D\uDCDC Legislation \u2014 Chancellor',
+    executive_action: '\u26A1 Executive Action',
+    gameover: '\uD83C\uDFC6 Game Over',
+  };
+  el('phaseLabel').textContent = phase === 'night' && nightTotal
+    ? `🌙 Night — ${nightAcked}/${nightTotal} revealed`
+    : (phaseNames[phase] || phase || '');
 
   el('lobbyPanel').style.display = phase === 'lobby' ? 'block' : 'none';
-  el('gamePanel').style.display = phase && phase !== 'lobby' ? 'block' : 'none';
+  // NOTE: gamePanel's display is owned by CSS (#gamePanel is the flex column
+  // that holds the stage). Never set 'block' here — an inline block would
+  // override that flex context and collapse the stage viewport fitStage()
+  // measures.
+  el('gamePanel').style.display = phase && phase !== 'lobby' ? '' : 'none';
 
   if (phase === 'lobby') {
-    const names = Object.values(currentPlayers).map(p => p.name);
+    const names = Object.values(currentPlayers).filter(p => p && p.retired !== true).map(p => p.name);
     el('playerCount').textContent = names.length;
     el('playerNames').textContent = names.join(', ');
     el('startBtn').disabled = names.length < 5 || names.length > 10;
@@ -915,10 +1349,19 @@ function render() {
     return `<div class="${classes.join(' ')}">${escapeHtml(p.name || '?')}</div>`;
   }).join('');
 
-  // Host-only escape hatch, visible only while a vote is open.
+  // Host-only escape hatches: force-resolve during elections, skip during night.
   const hostTools = el('hostTools');
   if (hostTools) {
-    hostTools.style.display = (phase === 'election' && currentMeta.hostUid === myUid) ? 'block' : 'none';
+    const showElection = phase === 'election' && currentMeta.hostUid === myUid;
+    const showNight = phase === 'night' && currentMeta.hostUid === myUid;
+    hostTools.style.display = (showElection || showNight) ? 'block' : 'none';
+    const skipBtn = el('nightSkipBtn');
+    if (skipBtn) {
+      skipBtn.style.display = showNight ? 'block' : 'none';
+      if (showNight) skipBtn.textContent = `Begin game now (${nightAcked}/${nightTotal} revealed)`;
+    }
+    const forceBtn = el('forceResolveBtn');
+    if (forceBtn) forceBtn.style.display = showElection ? 'block' : 'none';
   }
 
   if (phase === 'gameover') {
@@ -927,6 +1370,62 @@ function render() {
   } else {
     el('gameOverBanner').style.display = 'none';
   }
+  fitStage();
+}
+
+// Stage tiers: the fixed canvases the whole board is laid out on. Two boards
+// that are 2.49:1 stacked need a tall canvas; a 16:9 screen wants them side by
+// side. fitStage() sets the class, CSS owns the numbers, and the two can never
+// disagree — which is the failure the old measure-based guard kept hitting.
+const STAGE_TIERS = { wide: { w: 1600, h: 760 }, tall: { w: 1000, h: 900 } };
+const stageLayoutParam = (params.get('layout') || '').toLowerCase();
+let lastFit = -1;
+
+// ?layout=wide|tall pins the canvas (for a host whose screen reports an aspect
+// that reads wrong); otherwise the SCREEN's own aspect picks the tier.
+//
+// Deliberately the window's aspect, not the stage viewport's: the viewport
+// shrinks when the host tools appear (they are in flow below the stage), and
+// deriving the tier from it made a 1024x768 board flip from stacked to
+// side-by-side mid-game the moment a host tool popped up. The screen only
+// changes when the host actually resizes or switches resolution, which is
+// exactly when a re-layout is legitimate.
+function applyStageTier() {
+  const vw = window.innerWidth || 0;
+  const vh = window.innerHeight || 0;
+  const tier = STAGE_TIERS[stageLayoutParam] ? stageLayoutParam
+    : (vw > 0 && vh > 0 && vw / vh >= 1.5 ? 'wide' : 'tall');
+  try {
+    document.body.classList.toggle('layout-wide', tier === 'wide');
+    document.body.classList.toggle('layout-tall', tier === 'tall');
+  } catch (_) {}
+  return STAGE_TIERS[tier];
+}
+
+// Fit: one factor for the whole scene, contained (min of both axes) so nothing
+// is ever cropped, applied as --fit on the stage viewport. The table is a fixed
+// canvas that overflows that viewport symmetrically and is clipped; scaling it
+// around its own centre brings it back to exactly the box.
+//
+// Measured from the viewport's client box on purpose: the table is oversized
+// and scaled, so measuring it would fold the previous scale into the next
+// result. No-op in the lobby (the viewport has no box while hidden) — which is
+// also why the interim lobby keeps its own flowing layout.
+function fitStage() {
+  const vp = el('stageFit');
+  if (!vp) return;
+  const tier = applyStageTier();
+  const vw = vp.clientWidth || 0;
+  const vh = vp.clientHeight || 0;
+  if (!vw || !vh) return;
+  const fit = Math.min(vw / tier.w, vh / tier.h);
+  if (!Number.isFinite(fit) || fit <= 0) return;
+  // Skip sub-pixel churn: every write is a repaint, and render() fires often.
+  if (Math.abs(fit - lastFit) < 0.0005) return;
+  lastFit = fit;
+  try {
+    vp.style.setProperty('--fit', String(Number(fit.toFixed(4))));
+  } catch (_) {}
 }
 
 // Board overlay geometry — tile/tracker positions as % of the board image,
@@ -955,7 +1454,7 @@ function paintTileLayer(layerId, lefts, widths, kind, filled) {
   const w = i => (Array.isArray(widths) ? widths[i] : widths);
   if (layer.childElementCount !== lefts.length) {
     layer.innerHTML = lefts.map((left, i) =>
-      `<div class="tile-spot" style="left:${left}%;width:${w(i)}%;top:${TILE_TOP_PCT}%;aspect-ratio:${TILE_ASPECT}"><img src="img/tile-${kind}.png" alt="${kind} policy" draggable="false" /></div>`
+      `<div class="tile-spot" style="left:${left}%;width:${w(i)}%;top:${TILE_TOP_PCT}%;aspect-ratio:${TILE_ASPECT}"><img src="img/tile-${kind}.png" alt="${kind} policy" draggable="false" loading="lazy" /></div>`
     ).join('');
   }
   [...layer.children].forEach((spot, i) => spot.classList.toggle('filled', i < filled));
@@ -969,7 +1468,12 @@ function paintTrackerPips(tracker) {
       `<div class="tracker-pip" style="left:${x}%;top:${TRACKER_PIP_Y}%"></div>`
     ).join('');
   }
-  [...layer.children].forEach((pip, i) => pip.classList.toggle('lit', i < tracker));
+  [...layer.children].forEach((pip, i) => {
+    const lit = i < tracker;
+    pip.classList.toggle('lit', lit);
+    pip.classList.toggle('warn', lit && tracker === 2);
+    pip.classList.toggle('danger', lit && tracker >= 3);
+  });
 }
 
 // Per-round vote mirrors for seat dots. Re-subscribes when roundId changes;
@@ -1010,6 +1514,18 @@ function paintSeats() {
     rails.forEach(r => { r.innerHTML = ''; });
     return;
   }
+  // Build a state key from the data that affects seat visuals.
+  // Only animate when this key changes (president/chancellor/dead/nominee/votes).
+  const seatKey = order.join(',') + '|' +
+    (currentMeta.presidentUid || '') + '|' +
+    (currentMeta.chancellorUid || '') + '|' +
+    (currentMeta.chancellorCandidateUid || '') + '|' +
+    (currentMeta.phase || '') + '|' +
+    order.map(uid => (currentPlayers[uid] && currentPlayers[uid].alive === false ? 'D' : 'A')).join('') + '|' +
+    Object.keys(votesCastMap).sort().join(',');
+  const animate = seatKey !== prevSeatState;
+  prevSeatState = seatKey;
+
   const topN = n >= 8 ? 2 : 1;
   const bottomN = Math.ceil((n - topN) / 2);
   const sideN = n - topN - bottomN;
@@ -1021,9 +1537,16 @@ function paintSeats() {
     order.slice(topN + leftN, topN + leftN + rightN),
     order.slice(topN + leftN + rightN),
   ];
+  // When not animating, add a class that suppresses the CSS transition.
+  rails.forEach(r => r.classList.toggle('no-seat-transition', !animate));
   groups.forEach((uids, i) => {
     rails[i].innerHTML = uids.map(seatHtml).join('');
   });
+  if (!animate) {
+    // Remove the suppression class after the DOM settles so the next
+    // real change can animate in.
+    requestAnimationFrame(() => rails.forEach(r => r.classList.remove('no-seat-transition')));
+  }
 }
 
 function seatHtml(uid) {
@@ -1041,7 +1564,7 @@ function seatHtml(uid) {
   }
   return `<div class="${classes.join(' ')}">` +
     (badge ? `<span class="seat-badge">${badge}</span>` : '') +
-    `<img class="seat-card" src="img/back-role.png" alt="Secret role card" draggable="false" />` +
+    `<img class="seat-card" src="img/back-role.png" alt="Secret role card" draggable="false" loading="lazy" />` +
     `<span class="vote-dot"></span>` +
     `<span class="seat-name">${escapeHtml(p.name || '?')}</span></div>`;
 }

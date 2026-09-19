@@ -87,7 +87,25 @@
             "joinedAt": {
               ".write": "auth != null && auth.uid === $uid && !data.exists()"
             },
+            "roleSeen": {
+              ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+              ".validate": "newData.isBoolean()"
+            },
             "alive": {
+              ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+            },
+            "retired": {
+              ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
+            }
+          }
+        },
+
+        "reclaimRequests": {
+          ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+            ".write": "auth != null && auth.uid === $uid && ((!data.exists() && newData.exists()) || (data.exists() && !newData.exists()))",
+            "status": {
               ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()"
             }
           }
@@ -136,6 +154,15 @@
             "$uid": {
               ".read": "auth != null && auth.uid === $uid",
               ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val() && !data.exists()"
+            }
+          },
+          "reconnectPins": {
+            ".read": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            ".write": "auth != null && auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val()",
+            "$uid": {
+              ".read": "auth != null && auth.uid === $uid",
+              ".write": "auth != null && ((auth.uid === $uid && !data.exists()) || auth.uid === root.child('games').child($roomId).child('meta').child('hostUid').val())",
+              ".validate": "newData.isString() && newData.val().matches(/^[0-9]{4}$/)"
             }
           },
           "deck": {

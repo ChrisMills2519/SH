@@ -35,6 +35,18 @@
       <button id="joinBtn">Join Game</button>
     </section>
 
+    <section>
+      <h2>Reconnect to your seat</h2>
+      <p class="muted">Only needed if this browser lost its data (cleared storage, new
+        device, incognito). Enter your name and the 4-digit code shown when you joined.
+        The host's board screen must be open — it approves the move.</p>
+      <input id="reconnectNameInput" type="text" placeholder="Your name" maxlength="20" inputmode="text" />
+      <input id="reconnectRoomInput" type="text" placeholder="Room code" maxlength="6" style="text-transform:uppercase" />
+      <input id="reconnectCodeInput" type="text" placeholder="4-digit code" maxlength="4" inputmode="numeric" />
+      <button id="reconnectBtn">Reconnect</button>
+      <p id="reconnectError" class="error"></p>
+    </section>
+
     <p id="error" class="error"></p>
 
     <!-- DEV-ONLY START: solo-testing shortcut. Delete this section before game night. -->
@@ -72,6 +84,20 @@
       if (!name) { error.textContent = 'Enter a name.'; return; }
       if (!room) { error.textContent = 'Enter a room code.'; return; }
       window.location.href = `play.html?room=${room}&name=${encodeURIComponent(name)}`;
+    });
+
+    // Reconnect: same three fields, but routes into play.js's reclaim flow
+    // (?reconnect=1) with the code prefilled, so the player doesn't retype it.
+    document.getElementById('reconnectBtn').addEventListener('click', () => {
+      const name = document.getElementById('reconnectNameInput').value.trim();
+      const room = document.getElementById('reconnectRoomInput').value.trim().toUpperCase();
+      const code = document.getElementById('reconnectCodeInput').value.trim();
+      const error = document.getElementById('reconnectError');
+      if (!name) { error.textContent = 'Enter your name exactly as you joined.'; return; }
+      if (!room) { error.textContent = 'Enter the room code.'; return; }
+      if (!/^[0-9]{4}$/.test(code)) { error.textContent = 'Enter the 4-digit code from your original device.'; return; }
+      error.textContent = '';
+      window.location.href = `play.html?room=${room}&name=${encodeURIComponent(name)}&reconnect=1&pin=${code}`;
     });
   </script>
 </body>

@@ -23,8 +23,7 @@
         <button id="fullscreenBtn" class="sound-toggle" type="button">⛶ Fullscreen</button>
       </div>
     </div>
-    <p class="muted"><span class="phase-badge" id="phaseLabel"></span></p>
-    <div id="narrBar" class="narr-bar" style="display:none"><span id="narrText"></span></div>
+    <p class="muted phase-line"><span class="phase-badge" id="phaseLabel"></span> <span class="board-meta"><span id="fascistBoardLabel">5–6 players</span> · Election tracker pips light up on the Liberal board.</span></p>
 
     <div id="gameOverBanner" class="role-banner" style="display:none"></div>
 
@@ -42,33 +41,42 @@
     </section>
 
     <section id="gamePanel" style="display:none">
-      <div class="table" id="table">
-        <div class="seat-row seat-top" id="seatTop" aria-label="Top seats"></div>
-        <div class="table-middle">
-          <div class="seat-col seat-left" id="seatLeft" aria-label="Left seats"></div>
-          <div class="table-center">
-            <div class="boards">
-              <div class="board-stage" id="liberalBoard" aria-label="Liberal board">
-                <img class="board-img" src="img/board-liberal.png" alt="Official Liberal board" />
-                <div class="tile-layer" id="liberalTiles"></div>
-                <div class="pip-layer" id="trackerPips"></div>
-                <div class="pile-badge pile-draw-badge" id="drawBadge" title="Tiles left in draw pile">17</div>
+      <!-- The stage: a fixed-size scene (see --stage-w/--stage-h) that
+           fitStage() scales as one unit to whatever screen hosts it. Everything
+           the room looks at lives inside it; host chrome (#gameOverBanner,
+           #hostTools) stays outside so it never covers a seat and keeps its
+           full-size tap targets. -->
+      <div class="stage-fit" id="stageFit">
+        <div class="table" id="table">
+          <div class="seat-row seat-top" id="seatTop" aria-label="Top seats"></div>
+          <div class="table-middle">
+            <div class="seat-col seat-left" id="seatLeft" aria-label="Left seats"></div>
+            <div class="table-center">
+              <div class="boards">
+                <div class="board-stage" id="liberalBoard" aria-label="Liberal board">
+                  <img class="board-img" src="img/board-liberal.png" alt="Official Liberal board" />
+                  <div class="tile-layer" id="liberalTiles"></div>
+                  <div class="pip-layer" id="trackerPips"></div>
+                  <div class="pile-badge pile-draw-badge" id="drawBadge" title="Tiles left in draw pile">17</div>
+                </div>
+                <div class="policy-well" id="policyWell" aria-label="Policy deck">
+                  <div class="policy-fan" id="policyFan"></div>
+                  <div class="policy-well-label muted"><span id="deckCount">17</span> in deck · <span id="discardCount">0</span> discarded</div>
+                </div>
+                <div class="board-stage" id="fascistBoard" aria-label="Fascist board">
+                  <img class="board-img" id="fascistBoardArt" src="img/board-fascist-56.png" alt="Official Fascist board" />
+                  <div class="tile-layer" id="fascistTiles"></div>
+                  <div class="pile-badge pile-discard-badge" id="discardBadge" title="Tiles in discard pile">0</div>
+                </div>
               </div>
-              <div class="policy-well" id="policyWell" aria-label="Policy deck">
-                <div class="policy-fan" id="policyFan"></div>
-                <div class="policy-well-label muted"><span id="deckCount">17</span> in deck · <span id="discardCount">0</span> discarded</div>
-              </div>
-              <div class="board-stage" id="fascistBoard" aria-label="Fascist board">
-                <img class="board-img" id="fascistBoardArt" src="img/board-fascist-56.png" alt="Official Fascist board" />
-                <div class="tile-layer" id="fascistTiles"></div>
-                <div class="pile-badge pile-discard-badge" id="discardBadge" title="Tiles in discard pile">0</div>
-              </div>
-              <p class="muted"><span id="fascistBoardLabel">5–6 players</span> · Election tracker pips light up on the Liberal board.</p>
             </div>
+            <div class="seat-col seat-right" id="seatRight" aria-label="Right seats"></div>
           </div>
-          <div class="seat-col seat-right" id="seatRight" aria-label="Right seats"></div>
+          <div class="seat-row seat-bottom" id="seatBottom" aria-label="Bottom seats"></div>
+          <!-- Narration sits in its own stage row: it used to be a fixed overlay
+               at the bottom of the screen, which covered the bottom seat rail. -->
+          <div id="narrBar" class="narr-bar" style="display:none"><span id="narrText"></span></div>
         </div>
-        <div class="seat-row seat-bottom" id="seatBottom" aria-label="Bottom seats"></div>
       </div>
 
       <h3 style="display:none">Players</h3>

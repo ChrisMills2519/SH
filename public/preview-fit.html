@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<!-- DEV-ONLY fit preview — DELETE before game night (see README checklist).
+     Static mock of board.html with no Firebase: it mirrors the stage markup,
+     paintSeats() grouping, seatHtml() markup and fitStage() (marked MIRROR
+     below), so the numbers it prints are the real layout's numbers.
+
+     Need to see how the board behaves on a screen you don't have? Open
+     preview-layouts.html instead — it frames this page at several host sizes. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Secret Hitler — Fit Preview (dev only)</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  /* Preview rail: fixed left, board shifts right so nothing is covered. */
+  #previewRail {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 264px;
+    overflow-y: auto; z-index: 80; background: rgba(22,24,28,.97);
+    border-right: 2px solid var(--accent); padding: 12px; margin: 0;
+  }
+  #previewRail h3 { margin: 6px 0 8px; font-size: 15px; }
+  #previewRail .row { display: flex; gap: 6px; margin-bottom: 10px; }
+  #previewRail .row button { padding: 8px 6px; font-size: 13px; margin: 0; }
+  #previewRail .row button.active { outline: 2px solid #fff; }
+  #previewRail label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 2px; }
+  #previewReadout {
+    font-family: monospace; font-size: 12px; background: #111;
+    border-radius: 6px; padding: 8px; margin-top: 10px; white-space: pre-wrap;
+  }
+  #previewRail p.note { font-size: 12px; color: var(--muted); }
+  @media (min-width: 900px) {
+    body.preview .board-wrap { padding-left: 280px; }
+  }
+  /* Tools hidden: true game look, readout included. Toggle with H. */
+  body.preview.tools-hidden #previewRail { display: none; }
+  body.preview.tools-hidden .board-wrap { padding-left: 24px; }
+</style>
+</head>
+<body class="preview in-game">
+  <aside id="previewRail">
+    <h3>Fit preview (dev only)</h3>
+    <label>Players</label>
+    <div class="row" id="countRow">
+      <button data-n="5">5</button>
+      <button data-n="7">7</button>
+      <button data-n="10" class="active">10</button>
+    </div>
+    <label>Layout tier (auto = host aspect)</label>
+    <div class="row" id="layoutRow">
+      <button data-l="auto" class="active">auto</button>
+      <button data-l="wide">wide</button>
+      <button data-l="tall">tall</button>
+    </div>
+    <label>Phase</label>
+    <div class="row" id="phaseRow">
+      <button data-p="night" class="active">night</button>
+      <button data-p="election">election</button>
+      <button data-p="gameover">gameover</button>
+    </div>
+    <div class="row">
+      <button id="narrToggle" class="active">narr on</button>
+      <button id="toolsToggle">hide tools (H)</button>
+    </div>
+    <p class="note">Resize the window to feel the stage scale. The interior never
+      reflows — the readout prints how much slack is left over, and the probe
+      below reports what the browser actually measured.</p>
+    <div id="previewReadout">…</div>
+    <div id="probeReadout" class="note">…</div>
+    <!-- Raw geometry, filled by measure(). Hidden, but present in the DOM so
+         `chrome --headless --dump-dom` can read it without a debugger. -->
+    <pre id="probeData" style="display:none"></pre>
+  </aside>
+
+  <div class="board-wrap">
+    <div class="board-header">
+      <div class="board-header-top">
+        <h1><img class="logo logo-small" src="img/logo.png" alt="Secret Hitler" /> <span class="muted">— Room PREVIEW</span></h1>
+      </div>
+      <div class="board-header-controls">
+        <button class="sound-toggle" type="button">🔊 Sound on</button>
+        <button class="sound-toggle" type="button">🎙️ Narrator on</button>
+        <button class="sound-toggle" type="button">⛶ Fullscreen</button>
+      </div>
+    </div>
+    <p class="muted phase-line"><span class="phase-badge" id="phaseLabel"></span> <span class="board-meta"><span id="fascistBoardLabel">9–10 players</span> · Election tracker pips light up on the Liberal board.</span></p>
+
+    <div id="gameOverBanner" class="role-banner" style="display:none"></div>
+
+    <section id="gamePanel">
+      <div class="stage-fit" id="stageFit">
+        <div class="table" id="table">
+          <div class="seat-row seat-top" id="seatTop"></div>
+          <div class="table-middle">
+            <div class="seat-col seat-left" id="seatLeft"></div>
+            <div class="table-center">
+              <div class="boards">
+                <div class="board-stage" id="liberalBoard">
+                  <img class="board-img" src="img/board-liberal.png" alt="Official Liberal board" />
+                  <div class="tile-layer" id="liberalTiles"></div>
+                  <div class="pip-layer" id="trackerPips"></div>
+                  <div class="pile-badge pile-draw-badge">14</div>
+                </div>
+                <div class="policy-well" id="policyWell">
+                  <div class="policy-fan" id="policyFan"></div>
+                  <div class="policy-well-label muted"><span>14</span> in deck · <span>2</span> discarded</div>
+                </div>
+                <div class="board-stage" id="fascistBoard">
+                  <img class="board-img" src="img/board-fascist-910.png" alt="Official Fascist board" />
+                  <div class="tile-layer" id="fascistTiles"></div>
+                  <div class="pile-badge pile-discard-badge">2</div>
+                </div>
+              </div>
+            </div>
+            <div class="seat-col seat-right" id="seatRight"></div>
+          </div>
+          <div class="seat-row seat-bottom" id="seatBottom"></div>
+          <div id="narrBar" class="narr-bar"><span id="narrText">Waiting for the nomination.</span></div>
+        </div>
+      </div>
+
+      <div class="player-list" id="playerChips" style="display:none"></div>
+
+      <!-- MIRROR: host tools sit outside the stage, in flow below it. -->
+      <div id="hostTools" class="host-tools-warning">
+        <h3>Host tools</h3>
+        <button id="nightSkipBtn">Begin game now (7/10 revealed)</button>
+        <button id="forceResolveBtn" style="display:none">Force-resolve election (missing votes count as Nein)</button>
+      </div>
+    </section>
+  </div>
+
+<script>
+// MIRROR of public/js/board.js geometry + grouping (dev preview only).
+var TILE_TOP_PCT = 30.5, TILE_ASPECT = 320 / 397;
+var LIB_LEFT = [17.81, 30.94, 43.44, 56.56, 71.5];
+var LIB_W = [12.5, 12.5, 12.5, 12.5, 14.5];
+var FASC_LEFT = [10.6, 24.75, 37.9, 50.4, 62.85, 75.45];
+var PIP_X = [36.25, 44.94, 53.59, 62.28], PIP_Y = 79.39;
+var NAMES = ['Anja', 'Boris', 'Clara', 'Dmitri', 'Elsa', 'Fritz', 'Greta', 'Hans', 'Ingrid', 'Jonas'];
+
+// MIRROR of STAGE_TIERS + applyStageTier() in board.js.
+var STAGE_TIERS = { wide: { w: 1600, h: 760 }, tall: { w: 1000, h: 950 } };
+var ASPECT_THRESHOLD = 1.5;
+var layoutPref = 'auto';
+
+function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+function seatHtml(name, opts) {
+  opts = opts || {};
+  var cls = ['seat'];
+  if (opts.badge) cls.push(opts.cls);
+  var voted = opts.voted ? (opts.nein ? ' voted voted-nein' : ' voted') : '';
+  return '<div class="' + cls.join(' ') + voted + '">' +
+    (opts.badge ? '<span class="seat-badge">' + opts.badge + '</span>' : '') +
+    '<img class="seat-card" src="img/back-role.png" alt="Secret role card" draggable="false" />' +
+    '<span class="vote-dot"></span>' +
+    '<span class="seat-name">' + esc(name) + '</span></div>';
+}
+
+// MIRROR of paintSeats() rail split.
+function renderSeats(n) {
+  var order = NAMES.slice(0, n);
+  var topN = n >= 8 ? 2 : 1;
+  var bottomN = Math.ceil((n - topN) / 2);
+  var sideN = n - topN - bottomN;
+  var leftN = Math.ceil(sideN / 2);
+  var groups = [
+    order.slice(0, topN),
+    order.slice(topN, topN + leftN),
+    order.slice(topN + leftN, topN + leftN + (sideN - leftN)),
+    order.slice(topN + leftN + (sideN - leftN))
+  ];
+  var ids = ['seatTop', 'seatLeft', 'seatRight', 'seatBottom'];
+  groups.forEach(function (uids, i) {
+    document.getElementById(ids[i]).innerHTML = uids.map(function (name, j) {
+      var idx = order.indexOf(name);
+      var o = {};
+      if (idx === 1) { o.badge = 'PRESIDENT'; o.cls = 'president'; }
+      if (idx === 3) { o.badge = 'CHANCELLOR'; o.cls = 'chancellor'; }
+      if (idx < 6) o.voted = true;
+      if (idx === 4) o.nein = true;
+      return seatHtml(name, o);
+    }).join('');
+  });
+  // Mark one seat dead for flavor when 7+.
+  if (n >= 7) {
+    var bottom = document.getElementById('seatBottom');
+    var seats = bottom.querySelectorAll('.seat');
+    if (seats.length) seats[seats.length - 1].classList.add('dead');
+  }
+}
+
+function paintTiles() {
+  function layer(id, lefts, widths, kind, filled) {
+    var el = document.getElementById(id);
+    var w = function (i) { return Array.isArray(widths) ? widths[i] : widths; };
+    el.innerHTML = lefts.map(function (left, i) {
+      return '<div class="tile-spot' + (i < filled ? ' filled' : '') + '" style="left:' + left + '%;width:' + w(i) + '%;top:' + TILE_TOP_PCT + '%;aspect-ratio:' + TILE_ASPECT + '">' +
+        '<img src="img/tile-' + kind + '.png" alt="' + kind + ' policy" draggable="false" /></div>';
+    }).join('');
+  }
+  layer('liberalTiles', LIB_LEFT, LIB_W, 'liberal', 2);
+  layer('fascistTiles', FASC_LEFT, 13, 'fascist', 3);
+  var pips = document.getElementById('trackerPips');
+  pips.innerHTML = PIP_X.map(function (x, i) {
+    return '<div class="tracker-pip' + (i < 2 ? ' lit warn' : '') + '" style="left:' + x + '%;top:' + PIP_Y + '%"></div>';
+  }).join('');
+  var fan = document.getElementById('policyFan');
+  fan.innerHTML = Array.from({ length: 5 }, function () {
+    return '<img src="img/back-tile.png" alt="Face-down policy" draggable="false" />';
+  }).join('');
+}
+
+// Measured geometry — the browser's answer, not the arithmetic's. Everything
+// below compares getBoundingClientRect()s, which report the SCALED box for a
+// transformed element, so a collision found here is a collision on screen.
+// Three questions: does any region intersect another, does anything stick out
+// of the stage, and is the stage centred in its viewport (an off-centre stage
+// is the classic "doesn't sit right").
+function measure() {
+  var vp = document.getElementById('stageFit');
+  var stage = document.getElementById('table');
+  if (!vp || !stage) return null;
+  var vpR = vp.getBoundingClientRect(), stR = stage.getBoundingClientRect();
+  var regions = [];
+  ['seatTop', 'seatLeft', 'seatRight', 'seatBottom', 'narrBar'].forEach(function (id) {
+    var e = document.getElementById(id);
+    if (!e) return;
+    var r = e.getBoundingClientRect();
+    if (r.width > 0.5 && r.height > 0.5) regions.push({ name: id, r: r });
+  });
+  var boards = document.querySelector('.boards');
+  if (boards) regions.push({ name: 'boards', r: boards.getBoundingClientRect() });
+
+  var collide = [];
+  for (var i = 0; i < regions.length; i++) {
+    for (var j = i + 1; j < regions.length; j++) {
+      var a = regions[i].r, b = regions[j].r;
+      var ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      var oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      if (ox > 0.5 && oy > 0.5) {
+        collide.push(regions[i].name + ' x ' + regions[j].name + ' ' + Math.round(ox) + 'x' + Math.round(oy));
+      }
+    }
+  }
+  // Overhang past the stage frame, per side (positive = sticking out).
+  var spill = regions.map(function (g) {
+    var r = g.r;
+    return {
+      name: g.name,
+      l: Math.round(stR.left - r.left), r: Math.round(r.right - stR.right),
+      t: Math.round(stR.top - r.top), b: Math.round(r.bottom - stR.bottom)
+    };
+  }).filter(function (s) { return s.l > 0.5 || s.r > 0.5 || s.t > 0.5 || s.b > 0.5; });
+
+  var slack = {
+    left: Math.round(stR.left - vpR.left), right: Math.round(vpR.right - stR.right),
+    top: Math.round(stR.top - vpR.top), bottom: Math.round(vpR.bottom - stR.bottom)
+  };
+  // Where the vertical space above/below the stage actually goes. On a 1080p
+  // host this is ~30% of the screen, so it is worth seeing itemised rather than
+  // assumed to be header chrome.
+  // Margins are included because they are the invisible half of the chrome:
+  // a 30px phase line can cost 58px of layout once the <p> default margins land.
+  var chromeParts = [];
+  var wrap = document.querySelector('.board-wrap');
+  Array.prototype.forEach.call(wrap.children, function (c) {
+    var r = c.getBoundingClientRect();
+    var cs = getComputedStyle(c);
+    var mt = Math.round(parseFloat(cs.marginTop) || 0), mb = Math.round(parseFloat(cs.marginBottom) || 0);
+    if (r.height > 0.5 || mt || mb) {
+      chromeParts.push((c.id || c.className || c.tagName).toString().split(' ')[0] +
+        ':' + Math.round(r.height) + (mt || mb ? ' +' + mt + '/' + mb + 'm' : '') +
+        (cs.position === 'fixed' ? ' [fixed]' : ''));
+    }
+  });
+  var wrapInfo = {
+    display: getComputedStyle(wrap).display,
+    clientH: wrap.clientHeight,
+    scrollH: wrap.scrollHeight,
+    overflow: getComputedStyle(wrap).overflow,
+    cssHeight: getComputedStyle(wrap).height,
+    rectH: Math.round(wrap.getBoundingClientRect().height),
+    innerH: window.innerHeight,
+    docClientH: document.documentElement.clientHeight,
+    bodyRectH: Math.round(document.body.getBoundingClientRect().height)
+  };
+  // How much of the stage the visible content (seats + boards) actually covers.
+  // A low fill means a big slab of empty wood, which reads as "not sitting
+  // right" even when nothing overlaps or clips.
+  var content = [].slice.call(document.querySelectorAll('.seat')).map(function (e) { return e.getBoundingClientRect(); });
+  var bb = document.querySelector('.boards');
+  if (bb) content.push(bb.getBoundingClientRect());
+  var fill = null;
+  if (content.length) {
+    var l = Math.min.apply(null, content.map(function (r) { return r.left; }));
+    var t = Math.min.apply(null, content.map(function (r) { return r.top; }));
+    var rr = Math.max.apply(null, content.map(function (r) { return r.right; }));
+    var bo = Math.max.apply(null, content.map(function (r) { return r.bottom; }));
+    var pad = parseFloat(getComputedStyle(stage).paddingLeft) || 0;
+    var innerW = stR.width - pad * 2, innerH = stR.height - pad * 2;
+    fill = {
+      w: Math.round(((rr - l) / innerW) * 100), h: Math.round(((bo - t) / innerH) * 100),
+      deadLeft: Math.round((l - (stR.left + pad)) / innerW * 100),
+      deadRight: Math.round(((stR.right - pad) - rr) / innerW * 100),
+      deadTop: Math.round((t - (stR.top + pad)) / innerH * 100),
+      deadBottom: Math.round(((stR.bottom - pad) - bo) / innerH * 100)
+    };
+  }
+
+  var out = {
+    screen: [window.innerWidth, window.innerHeight],
+    contentFill: fill,
+    tier: (document.body.className.match(/layout-\w+/) || ['?'])[0],
+    stage: [Math.round(stR.width), Math.round(stR.height)],
+    viewport: [Math.round(vpR.width), Math.round(vpR.height)],
+    insideViewport: stR.left >= vpR.left - 0.5 && stR.right <= vpR.right + 0.5 &&
+                    stR.top >= vpR.top - 0.5 && stR.bottom <= vpR.bottom + 0.5,
+    collide: collide,
+    spill: spill,
+    chromeParts: chromeParts,
+    wrap: wrapInfo,
+    slack: slack,
+    slackDelta: { x: Math.abs(slack.left - slack.right), y: Math.abs(slack.top - slack.bottom) }
+  };
+  var pre = document.getElementById('probeData');
+  if (pre) pre.textContent = JSON.stringify(out);
+  var ro = document.getElementById('probeReadout');
+  if (ro) {
+    ro.textContent = 'measured: ' +
+      (collide.length ? 'COLLISIONS ' + collide.join(', ') : 'no collisions') +
+      (spill.length ? ' · SPILL ' + spill.map(function (s) { return s.name + '(l' + s.l + ' r' + s.r + ' t' + s.t + ' b' + s.b + ')'; }).join(', ') : ' · nothing spills') +
+      ' · slack ' + slack.left + '/' + slack.right + ' x ' + slack.top + '/' + slack.bottom +
+      (out.slackDelta.x > 2 || out.slackDelta.y > 2 ? ' · OFF-CENTRE' : ' · centred') +
+      (out.insideViewport ? ' · inside viewport' : ' · OUTSIDE VIEWPORT');
+  }
+  return out;
+}
+
+// MIRROR of fitStage() in board.js. The readout is the point of this page: it
+// prints the tier, the scale actually applied, and the slack left on each axis,
+// so "does it fit and is anything clipped" is a number rather than a vibe.
+function fitPreview() {
+  var vp = document.getElementById('stageFit');
+  var vw = vp.clientWidth || 0, vh = vp.clientHeight || 0;
+  // MIRROR: the tier follows the SCREEN aspect, not the stage viewport's — the
+  // viewport shrinks when the host tools show, and that used to flip the tier
+  // (and the whole board arrangement) mid-game.
+  var sw = window.innerWidth || 0, sh = window.innerHeight || 0;
+  var tierName = STAGE_TIERS[layoutPref] ? layoutPref
+    : (sw > 0 && sh > 0 && sw / sh >= ASPECT_THRESHOLD ? 'wide' : 'tall');
+  document.body.classList.toggle('layout-wide', tierName === 'wide');
+  document.body.classList.toggle('layout-tall', tierName === 'tall');
+  var tier = STAGE_TIERS[tierName];
+  var fit = (vw && vh) ? Math.min(vw / tier.w, vh / tier.h) : 0;
+  if (fit > 0) vp.style.setProperty('--fit', String(Number(fit.toFixed(4))));
+  var slackW = vw - tier.w * fit, slackH = vh - tier.h * fit;
+  document.getElementById('previewReadout').textContent =
+    'screen    ' + sw + 'x' + sh + '  (aspect ' + (sh ? (sw / sh).toFixed(2) : '?') + ')\n' +
+    'viewport  ' + vw + 'x' + vh + '  (stage space left over)\n' +
+    'tier      ' + tierName + '  stage ' + tier.w + 'x' + tier.h + '\n' +
+    'scale     ' + fit.toFixed(4) + '\n' +
+    'slack     ' + Math.max(0, Math.round(slackW)) + 'px wide, ' + Math.max(0, Math.round(slackH)) + 'px tall\n' +
+    'clipped   ' + ((tier.w * fit > vw + 0.5 || tier.h * fit > vh + 0.5) ? 'YES — BUG' : 'no');
+  measure();
+}
+
+var count = 10;
+document.getElementById('countRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  count = parseInt(b.dataset.n, 10);
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  renderSeats(count);
+  fitPreview();
+});
+
+document.getElementById('layoutRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  layoutPref = b.dataset.l;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  fitPreview();
+});
+
+var phaseLabels = {
+  night: '🌙 Night — 7/10 revealed',
+  election: '🗳️ Election',
+  gameover: '🏆 Game Over'
+};
+document.getElementById('phaseRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  var p = b.dataset.p;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  document.getElementById('phaseLabel').textContent = phaseLabels[p];
+  document.getElementById('nightSkipBtn').style.display = p === 'night' ? 'block' : 'none';
+  document.getElementById('forceResolveBtn').style.display = p === 'election' ? 'block' : 'none';
+  document.getElementById('hostTools').style.display = (p === 'night' || p === 'election') ? 'block' : 'none';
+  var banner = document.getElementById('gameOverBanner');
+  if (p === 'gameover') {
+    banner.style.display = 'block';
+    banner.textContent = 'Liberals win! (five_liberal_policies)';
+  } else { banner.style.display = 'none'; }
+  document.body.classList.toggle('in-game', p !== 'lobby');
+  fitPreview();
+});
+
+var narrOn = true;
+document.getElementById('narrToggle').addEventListener('click', function () {
+  narrOn = !narrOn;
+  this.textContent = narrOn ? 'narr on' : 'narr off';
+  this.classList.toggle('active', narrOn);
+  document.getElementById('narrBar').style.display = narrOn ? 'block' : 'none';
+  fitPreview();
+});
+
+window.addEventListener('resize', fitPreview);
+// Art + webfonts land after first paint: re-fit once they settle.
+window.addEventListener('load', fitPreview);
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(fitPreview).catch(function () {});
+}
+document.getElementById('phaseLabel').textContent = phaseLabels.night;
+document.getElementById('hostTools').style.display = 'block';
+
+// Tools hide (H key or button): true game look.
+function setToolsHidden(hidden) {
+  document.body.classList.toggle('tools-hidden', hidden);
+  document.getElementById('toolsToggle').textContent = hidden ? 'show tools (H)' : 'hide tools (H)';
+  fitPreview();
+}
+document.getElementById('toolsToggle').addEventListener('click', function () {
+  setToolsHidden(!document.body.classList.contains('tools-hidden'));
+});
+window.addEventListener('keydown', function (e) {
+  if ((e.key === 'h' || e.key === 'H') && !/INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) {
+    setToolsHidden(!document.body.classList.contains('tools-hidden'));
+  }
+});
+
+// URL params for the screenshot harness (DEV-ONLY):
+// ?players=10&phase=night&layout=tall&tools=hidden&narr=off
+(function applyParams() {
+  var q = new URLSearchParams(location.search);
+  var n = parseInt(q.get('players') || '', 10);
+  if (n === 5 || n === 7 || n === 10) {
+    count = n;
+    document.querySelectorAll('#countRow button').forEach(function (x) {
+      x.classList.toggle('active', parseInt(x.dataset.n, 10) === n);
+    });
+  }
+  var l = q.get('layout');
+  if (l === 'auto' || l === 'wide' || l === 'tall') {
+    layoutPref = l;
+    document.querySelectorAll('#layoutRow button').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.l === l);
+    });
+  }
+  var p = q.get('phase');
+  if (p === 'night' || p === 'election' || p === 'gameover') {
+    document.querySelectorAll('#phaseRow button').forEach(function (x) {
+      var on = x.dataset.p === p;
+      x.classList.toggle('active', on);
+      if (on) x.click();
+    });
+  }
+  if (q.get('narr') === 'off') document.getElementById('narrToggle').click();
+  if (q.get('tools') === 'hidden') setToolsHidden(true);
+})();
+renderSeats(count);
+paintTiles();
+fitPreview();
+</script>
+</body>
+</html>

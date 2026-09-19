@@ -1,0 +1,23 @@
+# Firebase local
+.firebase/
+.firebase-debug.log
+firestore-debug.log
+database-debug.log
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local backups / large sources (keep currently-tracked img/snd, ignore future dumps)
+public/img/original-*/
+*.bak
+*.wav
+public/snd/fullscript*.mp3
