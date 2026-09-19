@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#1a1816" />
-<title>Secret Hitler</title>
+<title>Secret Hitler — Join</title>
 <link rel="icon" href="data:," />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,53 +12,104 @@
 <link rel="stylesheet" href="css/style.css" />
 </head>
 <body class="centered">
-  <main class="card">
+  <main class="card join-card">
     <h1 class="game-title"><img class="logo" src="img/logo.png" alt="Secret Hitler" /></h1>
-    <p class="muted">Unofficial digital play aid. Fan adaptation, non-commercial, under
-      <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener">CC BY-NC-SA 4.0</a>.
-      Original game by Mike Boxleiter, Tommy Maranges &amp; Mac Schubert —
-      <a href="https://www.secrethitler.com" target="_blank" rel="noopener">secrethitler.com</a>.
-      Card/board art re-rendered from
-      <a href="https://yingtongli.me/blog/2019/12/25/secret-hitler.html" target="_blank" rel="noopener">Ying Tong Li's CC BY-NC-SA vector rebuild</a>;
-      power icons by <a href="https://kenney.nl/assets/board-game-icons" target="_blank" rel="noopener">Kenney (CC0)</a>.
-      See <a href="ATTRIBUTION.md" target="_blank" rel="noopener">ATTRIBUTION</a>.</p>
+    <p class="muted join-tagline">Take a seat at the table. Enter the 4-letter code from the shared display.</p>
 
-    <section>
-      <h2>Host on the shared display</h2>
-      <button id="hostBtn">Host a Game</button>
+    <div class="join-tabs" role="tablist" aria-label="Join or reconnect">
+      <button id="joinTab" role="tab" aria-selected="true" aria-controls="joinPanel" class="join-tab active" type="button">Join Game</button>
+      <button id="reconnectTab" role="tab" aria-selected="false" aria-controls="reconnectPanel" class="join-tab" type="button">Reconnect<span id="reconnectDot" class="reconnect-dot" hidden></span></button>
+    </div>
+
+    <section id="joinPanel" role="tabpanel" aria-labelledby="joinTab">
+      <form id="joinForm" novalidate>
+        <div class="field">
+          <div class="field-row">
+            <label for="nameInput">Your name</label>
+            <span id="nameCount" class="char-count" aria-hidden="true">0/20</span>
+          </div>
+          <input id="nameInput" name="playerName" type="text" placeholder="e.g. Ada" maxlength="20"
+            autocomplete="nickname" autocapitalize="words" spellcheck="false"
+            inputmode="text" enterkeyhint="next" aria-describedby="nameError nameCount" autofocus />
+          <p id="nameError" class="error field-error" aria-live="polite"></p>
+        </div>
+        <div class="field">
+          <label for="roomInput">Room code</label>
+          <input id="roomInput" name="roomCode" type="text" placeholder="ABCD" maxlength="4"
+            autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"
+            inputmode="text" enterkeyhint="go" aria-describedby="roomError roomHint" class="room-input" />
+          <p id="roomHint" class="muted field-hint">4 letters on the shared display — no numbers that look like letters.</p>
+          <p id="roomError" class="error field-error" aria-live="polite"></p>
+        </div>
+        <div id="duplicateWarn" class="duplicate-warn" hidden>
+          <p class="muted" id="duplicateText"></p>
+          <label class="duplicate-confirm"><input id="duplicateConfirm" type="checkbox" /> I know — same name, different seat</label>
+        </div>
+        <button id="joinBtn" type="submit">Join Game</button>
+        <p id="joinStatus" class="muted join-status" aria-live="polite"></p>
+      </form>
+      <p class="muted join-switch">Lost your seat mid-game? <button id="gotoReconnect" class="linklike" type="button">Reconnect with your code →</button></p>
     </section>
 
-    <section>
-      <h2>Join on your phone</h2>
-      <input id="nameInput" type="text" placeholder="Your name" maxlength="20" inputmode="text" />
-      <input id="roomInput" type="text" placeholder="Room code" maxlength="6" style="text-transform:uppercase" />
-      <button id="joinBtn">Join Game</button>
+    <section id="reconnectPanel" role="tabpanel" aria-labelledby="reconnectTab" hidden>
+      <form id="reconnectForm" novalidate>
+        <p class="muted">Only needed if this browser lost its data (cleared storage, new
+          device, incognito). The host's board screen must be open — it approves the move.</p>
+        <div class="field">
+          <label for="reconnectNameInput">Your name</label>
+          <input id="reconnectNameInput" type="text" placeholder="Name exactly as you joined" maxlength="20"
+            autocomplete="nickname" autocapitalize="words" spellcheck="false"
+            inputmode="text" enterkeyhint="next" aria-describedby="reconnectError" />
+        </div>
+        <div class="field-row-2">
+          <div class="field">
+            <label for="reconnectRoomInput">Room code</label>
+            <input id="reconnectRoomInput" type="text" placeholder="ABCD" maxlength="4"
+              autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"
+              inputmode="text" enterkeyhint="next" class="room-input" />
+          </div>
+          <div class="field">
+            <label for="reconnectCodeInput">4-digit code</label>
+            <input id="reconnectCodeInput" type="text" placeholder="1234" maxlength="4"
+              autocomplete="off" inputmode="numeric" enterkeyhint="go" class="room-input" />
+          </div>
+        </div>
+        <button id="reconnectBtn" type="submit">Reconnect</button>
+        <p id="reconnectError" class="error" aria-live="polite"></p>
+      </form>
+      <p class="muted join-switch"><button id="gotoJoin" class="linklike" type="button">← Back to new join</button></p>
     </section>
 
-    <section>
-      <h2>Reconnect to your seat</h2>
-      <p class="muted">Only needed if this browser lost its data (cleared storage, new
-        device, incognito). Enter your name and the 4-digit code shown when you joined.
-        The host's board screen must be open — it approves the move.</p>
-      <input id="reconnectNameInput" type="text" placeholder="Your name" maxlength="20" inputmode="text" />
-      <input id="reconnectRoomInput" type="text" placeholder="Room code" maxlength="6" style="text-transform:uppercase" />
-      <input id="reconnectCodeInput" type="text" placeholder="4-digit code" maxlength="4" inputmode="numeric" />
-      <button id="reconnectBtn">Reconnect</button>
-      <p id="reconnectError" class="error"></p>
-    </section>
+    <details class="host-details">
+      <summary>Hosting? Show the board on the shared display</summary>
+      <button id="hostBtn" class="secondary" type="button">Host a Game</button>
+    </details>
 
-    <p id="error" class="error"></p>
-
-    <!-- DEV-ONLY START: solo-testing shortcut. Delete this section before game night. -->
-    <section>
-      <h2>DEV testing only</h2>
-      <button id="devBtn">Solo dev test (board + bots)</button>
-      <p class="muted">Opens a new room's board with <code>?dev=1</code> (bot panel + rig buttons). Needs dev database rules.</p>
-    </section>
-    <!-- DEV-ONLY END -->
+    <details class="credits-details">
+      <summary>Credits &amp; license</summary>
+      <p class="muted">Unofficial digital play aid. Fan adaptation, non-commercial, under
+        <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener">CC BY-NC-SA 4.0</a>.
+        Original game by Mike Boxleiter, Tommy Maranges &amp; Mac Schubert —
+        <a href="https://www.secrethitler.com" target="_blank" rel="noopener">secrethitler.com</a>.
+        Card/board art re-rendered from
+        <a href="https://yingtongli.me/blog/2019/12/25/secret-hitler.html" target="_blank" rel="noopener">Ying Tong Li's CC BY-NC-SA vector rebuild</a>;
+        power icons by <a href="https://kenney.nl/assets/board-game-icons" target="_blank" rel="noopener">Kenney (CC0)</a>.
+        See <a href="ATTRIBUTION.md" target="_blank" rel="noopener">ATTRIBUTION</a>.</p>
+    </details>
   </main>
 
   <script type="module">
+    import { db, ensureSignedIn } from './js/firebase-config.js';
+    import { ref, get } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+
+    const $ = id => document.getElementById(id);
+    const joinTab = $('joinTab'), reconnectTab = $('reconnectTab');
+    const joinPanel = $('joinPanel'), reconnectPanel = $('reconnectPanel');
+    const nameInput = $('nameInput'), roomInput = $('roomInput');
+    const nameError = $('nameError'), roomError = $('roomError');
+    const nameCount = $('nameCount'), joinBtn = $('joinBtn'), joinStatus = $('joinStatus');
+    const duplicateWarn = $('duplicateWarn'), duplicateText = $('duplicateText'), duplicateConfirm = $('duplicateConfirm');
+
     function randomRoomCode() {
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
       let code = '';
@@ -66,37 +117,189 @@
       return code;
     }
 
-    document.getElementById('hostBtn').addEventListener('click', () => {
+    // ---- normalization (single source of truth for this page) ----
+    const cleanName = v => (v || '').trim().replace(/\s+/g, ' ').slice(0, 20);
+    const cleanRoom = v => (v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    const ROOM_OK = /^[A-HJ-NP-Z2-9]{4}$/; // matches generator charset (no I, O, 0, 1)
+
+    function showTab(which) {
+      const join = which !== 'reconnect';
+      joinTab.classList.toggle('active', join);
+      reconnectTab.classList.toggle('active', !join);
+      joinTab.setAttribute('aria-selected', String(join));
+      reconnectTab.setAttribute('aria-selected', String(!join));
+      joinPanel.hidden = !join;
+      reconnectPanel.hidden = join;
+      try { localStorage.setItem('sh_last_tab', join ? 'join' : 'reconnect'); } catch (_) {}
+      (join ? nameInput : $('reconnectNameInput')).focus({ preventScroll: true });
+    }
+    joinTab.addEventListener('click', () => showTab('join'));
+    reconnectTab.addEventListener('click', () => showTab('reconnect'));
+    $('gotoReconnect').addEventListener('click', () => showTab('reconnect'));
+    $('gotoJoin').addEventListener('click', () => showTab('join'));
+
+    // ---- prefill: last-used name/room + saved-session dot ----
+    try {
+      const lastName = localStorage.getItem('sh_last_name');
+      const lastRoom = localStorage.getItem('sh_last_room');
+      if (lastName) nameInput.value = lastName;
+      if (lastRoom) roomInput.value = lastRoom;
+      updateCount();
+      // Auto-detect: any saved reconnect PIN means this device joined before.
+      let hasSession = false;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        if (k.startsWith('sh_reconnect_')) { hasSession = true; break; }
+      }
+      $('reconnectDot').hidden = !hasSession;
+      // Restore last tab, but default to join unless reconnect was explicit.
+      const params = new URLSearchParams(location.search);
+      if (params.get('reconnect') === '1' || (!lastName && hasSession && localStorage.getItem('sh_last_tab') === 'reconnect')) {
+        showTab('reconnect');
+      } else if (lastRoom && !lastName) {
+        roomInput.focus({ preventScroll: true });
+      }
+    } catch (_) {}
+    try {
+      const p = new URLSearchParams(location.search);
+      if (p.get('room')) roomInput.value = cleanRoom(p.get('room'));
+      updateCount();
+    } catch (_) {}
+
+    function updateCount() {
+      nameCount.textContent = `${cleanName(nameInput.value).length}/20`;
+    }
+    nameInput.addEventListener('input', () => {
+      // Live uppercase-free name: just update counter + clear error on type.
+      updateCount();
+      if (cleanName(nameInput.value).length >= 2) nameError.textContent = '';
+    });
+    roomInput.addEventListener('input', () => {
+      // Normalize room as they type: strip junk, force uppercase.
+      const pos = roomInput.selectionStart;
+      roomInput.value = cleanRoom(roomInput.value);
+      try { roomInput.setSelectionRange(pos, pos); } catch (_) {}
+      if (ROOM_OK.test(roomInput.value)) roomError.textContent = '';
+    });
+    roomInput.addEventListener('blur', () => { roomInput.value = cleanRoom(roomInput.value); });
+    nameInput.addEventListener('blur', () => { nameInput.value = cleanName(nameInput.value); updateCount(); });
+
+    $('hostBtn').addEventListener('click', () => {
       const room = randomRoomCode();
       window.location.href = `board.html?room=${room}&new=1`;
     });
 
-    // DEV-ONLY: delete with the section above before game night.
-    document.getElementById('devBtn').addEventListener('click', () => {
-      const room = randomRoomCode();
-      window.location.href = `board.html?room=${room}&new=1&dev=1`;
-    });
+    // ---- lazy firebase: only needed for room-exists + duplicate-name checks ----
+    let dbReady = null;
+    function ensureDb() {
+      if (!dbReady) dbReady = ensureSignedIn().then(() => db).catch(() => null);
+      return dbReady;
+    }
+    // Warm up after first paint so an actual join rarely waits on auth.
+    if (window.requestIdleCallback) requestIdleCallback(() => ensureDb());
+    else setTimeout(() => ensureDb(), 1500);
 
-    document.getElementById('joinBtn').addEventListener('click', () => {
-      const name = document.getElementById('nameInput').value.trim();
-      const room = document.getElementById('roomInput').value.trim().toUpperCase();
-      const error = document.getElementById('error');
-      if (!name) { error.textContent = 'Enter a name.'; return; }
-      if (!room) { error.textContent = 'Enter a room code.'; return; }
+    function setBusy(busy, label) {
+      joinBtn.disabled = busy;
+      joinBtn.textContent = busy ? (label || 'Checking…') : 'Join Game';
+    }
+
+    async function checkRoomAndName(room, nameLower) {
+      // Best-effort pre-flight: never blocks join on failure (offline/rules).
+      // Returns { roomExists, full, duplicate } with nulls when unknown.
+      const database = await Promise.race([
+        ensureDb(),
+        new Promise(res => setTimeout(() => res(null), 4000)),
+      ]);
+      if (!database) return { roomExists: null, full: null, duplicate: null };
+      try {
+        const metaSnap = await get(ref(database, `games/${room}/meta`));
+        if (!metaSnap.exists()) return { roomExists: false, full: null, duplicate: null };
+        const playersSnap = await get(ref(database, `games/${room}/players`));
+        const players = playersSnap.val() || {};
+        const names = Object.values(players).map(p => ((p && p.name) || '').trim().toLowerCase());
+        return {
+          roomExists: true,
+          full: Object.keys(players).length >= 10,
+          duplicate: names.includes(nameLower),
+        };
+      } catch (_) {
+        return { roomExists: null, full: null, duplicate: null };
+      }
+    }
+
+    function goPlay(room, name) {
+      try {
+        localStorage.setItem('sh_last_name', name);
+        localStorage.setItem('sh_last_room', room);
+      } catch (_) {}
       window.location.href = `play.html?room=${room}&name=${encodeURIComponent(name)}`;
+    }
+
+    $('joinForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const name = cleanName(nameInput.value);
+      const room = cleanRoom(roomInput.value);
+      nameInput.value = name; roomInput.value = room; updateCount();
+      let ok = true;
+      if (name.length < 2) { nameError.textContent = 'Enter a name (2+ letters).'; ok = false; }
+      else nameError.textContent = '';
+      if (!ROOM_OK.test(room)) { roomError.textContent = 'Enter the 4-letter code from the shared display.'; ok = false; }
+      else roomError.textContent = '';
+      if (!ok) return;
+
+      // Duplicate soft-warning: first submit with a taken name only warns.
+      const lower = name.toLowerCase();
+      if (duplicateWarn.hidden === false && duplicateText.dataset.name === lower && !duplicateConfirm.checked) {
+        // Warned already and not confirmed — hold.
+        joinStatus.textContent = 'Tick the box above to join with the same name, or pick another.';
+        return;
+      }
+
+      setBusy(true);
+      joinStatus.textContent = '';
+      const pre = await checkRoomAndName(room, lower);
+      if (pre.roomExists === false) {
+        setBusy(false);
+        roomError.textContent = 'Room not found. Check the code on the shared display.';
+        return;
+      }
+      if (pre.full) {
+        setBusy(false);
+        roomError.textContent = 'Room is full (10 players max).';
+        return;
+      }
+      if (pre.duplicate && duplicateConfirm.checked !== true) {
+        // Show warning, keep everything typed, require explicit confirm.
+        duplicateText.textContent = `"${name}" is already seated — sure that's you on a second device? Rename, or tick the box to join anyway.`;
+        duplicateText.dataset.name = lower;
+        duplicateWarn.hidden = false;
+        setBusy(false);
+        joinStatus.textContent = '';
+        duplicateConfirm.focus({ preventScroll: true });
+        return;
+      }
+      setBusy(true, 'Joining…');
+      goPlay(room, name);
     });
 
     // Reconnect: same three fields, but routes into play.js's reclaim flow
     // (?reconnect=1) with the code prefilled, so the player doesn't retype it.
-    document.getElementById('reconnectBtn').addEventListener('click', () => {
-      const name = document.getElementById('reconnectNameInput').value.trim();
-      const room = document.getElementById('reconnectRoomInput').value.trim().toUpperCase();
-      const code = document.getElementById('reconnectCodeInput').value.trim();
-      const error = document.getElementById('reconnectError');
-      if (!name) { error.textContent = 'Enter your name exactly as you joined.'; return; }
-      if (!room) { error.textContent = 'Enter the room code.'; return; }
+    $('reconnectForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const name = cleanName($('reconnectNameInput').value);
+      const room = cleanRoom($('reconnectRoomInput').value);
+      const code = ($('reconnectCodeInput').value || '').trim();
+      const error = $('reconnectError');
+      $('reconnectNameInput').value = name;
+      $('reconnectRoomInput').value = room;
+      if (name.length < 2) { error.textContent = 'Enter your name exactly as you joined.'; return; }
+      if (!ROOM_OK.test(room)) { error.textContent = 'Enter the 4-letter room code.'; return; }
       if (!/^[0-9]{4}$/.test(code)) { error.textContent = 'Enter the 4-digit code from your original device.'; return; }
       error.textContent = '';
+      const btn = $('reconnectBtn');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
       window.location.href = `play.html?room=${room}&name=${encodeURIComponent(name)}&reconnect=1&pin=${code}`;
     });
   </script>

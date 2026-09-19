@@ -43,19 +43,25 @@ async function main() {
     return;
   }
 
-  const name = nameFromUrl || prompt('Your name:');
+  // No prompt(): a missing ?name= (typed URL, bookmark) renders an inline
+  // form instead of blocking the browser prompt, then continues the join.
+  let name = (nameFromUrl || '').trim().replace(/\s+/g, ' ').slice(0, 20);
+  if (!name || !room) {
+    renderInlineJoin(name);
+    return;
+  }
 
   // Reject ghost joins: the room must already exist (created by the board).
   const metaSnap = await get(ref(db, `games/${room}/meta`));
   if (!metaSnap.exists()) {
     el('status').textContent = 'Room not found. Check the code and try again.';
-    el('main').innerHTML = '';
+    el('main').innerHTML = `<p><a href="index.html?room=${encodeURIComponent(room || '')}">← Back to join</a></p>`;
     return;
   }
   const playersSnap = await get(ref(db, `games/${room}/players`));
   if (playersSnap.exists() && Object.keys(playersSnap.val()).length >= 10) {
     el('status').textContent = 'Room is full (10 players max).';
-    el('main').innerHTML = '';
+    el('main').innerHTML = `<p><a href="index.html?room=${encodeURIComponent(room || '')}">← Back to join</a></p>`;
     return;
   }
 
@@ -72,6 +78,44 @@ async function main() {
   // Only once this seat has actually joined — the reconnect flow has no role
   // yet and its own UI owns the screen.
   initRoleMenu();
+}
+
+// Inline join form: replaces the old prompt('Your name:') fallback. Keeps the
+// player on the themed page with validation instead of a browser dialog.
+function renderInlineJoin(presetName) {
+  el('status').textContent = `Room ${room || '???'} — enter your name to take a seat`;
+  el('main').innerHTML = `
+    <form id="inlineJoinForm" novalidate>
+      <div class="field">
+        <label for="inlineName">Your name</label>
+        <input id="inlineName" type="text" placeholder="e.g. Ada" maxlength="20"
+          autocomplete="nickname" autocapitalize="words" spellcheck="false"
+          inputmode="text" enterkeyhint="go" />
+        <p id="inlineNameError" class="error field-error" aria-live="polite"></p>
+      </div>
+      <button type="submit">Join Game</button>
+      <p class="muted join-switch"><a href="index.html${room ? `?room=${encodeURIComponent(room)}` : ''}">← Back to join screen</a></p>
+    </form>`;
+  const input = document.getElementById('inlineName');
+  if (presetName) input.value = presetName;
+  try {
+    const last = localStorage.getItem('sh_last_name');
+    if (last && !input.value) input.value = last;
+  } catch (_) {}
+  input.focus({ preventScroll: true });
+  document.getElementById('inlineJoinForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const clean = input.value.trim().replace(/\s+/g, ' ').slice(0, 20);
+    if (clean.length < 2) {
+      document.getElementById('inlineNameError').textContent = 'Enter a name (2+ letters).';
+      return;
+    }
+    try {
+      localStorage.setItem('sh_last_name', clean);
+      if (room) localStorage.setItem('sh_last_room', room);
+    } catch (_) {}
+    window.location.href = `play.html?room=${encodeURIComponent(room || '')}&name=${encodeURIComponent(clean)}`;
+  });
 }
 
 function attachListeners() {

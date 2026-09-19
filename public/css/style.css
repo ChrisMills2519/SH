@@ -230,6 +230,135 @@ img { background: var(--panel); }
   font-size: 13px;
 }
 
+/* Join screen: tabbed Join / Reconnect card. Phone-first: 48px targets,
+   per-field errors with reserved height (no layout shift), room code as
+   wide-tracked uppercase. */
+.join-card { max-width: 440px; }
+.join-tagline { margin-top: -8px; }
+.join-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 2px solid #000;
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 16px 0 4px;
+  box-shadow: var(--shadow-hard);
+}
+.join-tab {
+  width: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-paper);
+  color: var(--muted);
+  padding: 12px 8px;
+  position: relative;
+}
+.join-tab.active {
+  background: var(--accent);
+  color: var(--ink);
+}
+.join-tab + .join-tab { border-left: 2px solid #000; }
+.reconnect-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fascist-bright);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.join-card .field { margin: 12px 0 4px; }
+.join-card label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.field-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.char-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.field-error { min-height: 20px; margin: 4px 0 0; }
+.field-hint { margin: 4px 0 0; font-size: 13px; }
+.join-card input { min-height: 48px; }
+.join-card button[type="submit"] { min-height: 48px; margin-top: 8px; }
+.room-input {
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  text-align: center;
+  font-size: 18px;
+}
+.field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.duplicate-warn {
+  border: 1px dashed var(--accent);
+  padding: 8px 12px;
+  margin: 12px 0 4px;
+  border-radius: 2px;
+  background: rgba(201,168,76,0.07);
+}
+.duplicate-warn p { margin: 4px 0; }
+.duplicate-confirm {
+  display: flex !important;
+  gap: 8px;
+  align-items: flex-start;
+  font-family: var(--font-body) !important;
+  font-size: 14px !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  color: var(--text) !important;
+}
+.duplicate-confirm input {
+  width: auto;
+  min-height: 0;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.join-status { min-height: 20px; margin-top: 8px; }
+.join-switch { margin-top: 16px; text-align: center; }
+.linklike {
+  width: auto;
+  display: inline;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.host-details, .credits-details {
+  margin-top: 16px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+.host-details summary, .credits-details summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.host-details button { margin-top: 10px; }
+.credits-details p { font-size: 13px; }
+
 /* Board layout */
 .board-wrap {
   max-width: 1100px;
@@ -1260,11 +1389,19 @@ body.enact-focus-liberal #policyWell, body.enact-focus-fascist #policyWell,
 body.enact-focus-liberal #narrBar, body.enact-focus-fascist #narrBar { opacity: 0.08; filter: grayscale(0.8) brightness(0.6); transition: opacity 0.4s, filter 0.4s; }
 body.enact-focus-liberal #liberalBoard,
 body.enact-focus-fascist #fascistBoard { transition: transform 0.6s cubic-bezier(0.5,0,0.2,1), box-shadow 0.4s ease, opacity 0.3s; }
-body.enact-focus-liberal #liberalBoard { transform: scale(var(--zoom)); transform-origin: center center; z-index: 20; position: relative; box-shadow: 0 0 80px rgba(59,111,214,0.8); }
-body.enact-focus-fascist #fascistBoard { transform: scale(var(--zoom)); transform-origin: center center; z-index: 20; position: relative; box-shadow: 0 0 80px rgba(163,40,47,0.85); }
+/* Centered zoom: JS sets --zoom-tx/--zoom-ty (board-local px) so the active
+   board's centre lands on the stage centre before scaling about that centre.
+   z-index 45 lifts it above the base overlay dim (40); the direct-mode
+   overlay itself is transparent (see below), so no dark patch sits on it. */
+body.enact-focus-liberal #liberalBoard { transform: translate(var(--zoom-tx, 0px), var(--zoom-ty, 0px)) scale(var(--zoom)); transform-origin: center center; z-index: 45; position: relative; box-shadow: 0 0 80px rgba(59,111,214,0.8); }
+body.enact-focus-fascist #fascistBoard { transform: translate(var(--zoom-tx, 0px), var(--zoom-ty, 0px)) scale(var(--zoom)); transform-origin: center center; z-index: 45; position: relative; box-shadow: 0 0 80px rgba(163,40,47,0.85); }
 /* Direct-to-board flight: caption docks top, NO center tile — the card
-   travels straight from the deck into the zoomed slot. */
-.enact-overlay.direct { align-items: flex-start; padding-top: 4%; }
+   travels straight from the deck into the zoomed slot. The overlay is
+   transparent here (caption only, above the zoomed board at z 46): the old
+   radial dim sat at z 40 *above* the zoomed board (z 20) and painted the
+   dark patch over the very board being read. Other modes (tally, veto,
+   power callout) keep the dim — that darkening is intentional there. */
+.enact-overlay.direct { align-items: flex-start; padding-top: 4%; background: transparent; pointer-events: none; z-index: 46; }
 .enact-overlay.direct .enact-big-tile { transform: none; opacity: 1; }
 .enact-overlay.direct .enact-big-tile img { display: none; }
 .enact-overlay.direct .enact-caption { font-size: 30px; margin-top: 0; }
