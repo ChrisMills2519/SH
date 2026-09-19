@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#1a1816" />
 <title>Secret Hitler — Join</title>
-<link rel="icon" href="data:," />
+<link rel="icon" href="img/seal-liberal.png" />
+<link rel="apple-touch-icon" href="img/seal-liberal.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=Special+Elite&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,700;6..96,900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -14,7 +15,17 @@
 <body class="centered">
   <main class="card join-card">
     <h1 class="game-title"><img class="logo" src="img/logo.png" alt="Secret Hitler" /></h1>
-    <p class="muted join-tagline">Take a seat at the table. Enter the 4-letter code from the shared display.</p>
+
+    <section class="host-section" aria-labelledby="hostHeading">
+      <h2 id="hostHeading">1. Host on the shared display</h2>
+      <p class="muted">Start here on the TV/laptop — you'll get a QR code for phones to scan.</p>
+      <button id="hostBtn" type="button">Host a Game</button>
+    </section>
+
+    <section aria-label="Join on your phone">
+      <h2>2. Join on your phone</h2>
+      <p class="muted join-tagline">Scanned the QR? Enter your name. Or type the 4-letter room code below.</p>
+    </section>
 
     <div class="join-tabs" role="tablist" aria-label="Join or reconnect">
       <button id="joinTab" role="tab" aria-selected="true" aria-controls="joinPanel" class="join-tab active" type="button">Join Game</button>
@@ -79,11 +90,6 @@
       </form>
       <p class="muted join-switch"><button id="gotoJoin" class="linklike" type="button">← Back to new join</button></p>
     </section>
-
-    <details class="host-details">
-      <summary>Hosting? Show the board on the shared display</summary>
-      <button id="hostBtn" class="secondary" type="button">Host a Game</button>
-    </details>
 
     <details class="credits-details">
       <summary>Credits &amp; license</summary>

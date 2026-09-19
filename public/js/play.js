@@ -59,9 +59,20 @@ async function main() {
     return;
   }
   const playersSnap = await get(ref(db, `games/${room}/players`));
-  if (playersSnap.exists() && Object.keys(playersSnap.val()).length >= 10) {
+  const existingPlayers = playersSnap.val() || {};
+  if (Object.keys(existingPlayers).length >= 10) {
     el('status').textContent = 'Room is full (10 players max).';
     el('main').innerHTML = `<p><a href="index.html?room=${encodeURIComponent(room || '')}">← Back to join</a></p>`;
+    return;
+  }
+  // Hard block: same name (any case) already seated under another uid.
+  // The form pre-checks this, but a race between two phones needs the guard
+  // here too — send them back to pick another name, with the roster visible.
+  const clash = Object.entries(existingPlayers).some(([uid, p]) =>
+    uid !== myUid && ((p && p.name) || '').trim().toLowerCase() === name.toLowerCase());
+  if (clash) {
+    try { if (joinRosterUnsub) { joinRosterUnsub(); joinRosterUnsub = null; } } catch (_) {}
+    renderInlineJoin('', `"${name}" is already taken — pick another name.`);
     return;
   }
 
@@ -80,41 +91,133 @@ async function main() {
   initRoleMenu();
 }
 
-// Inline join form: replaces the old prompt('Your name:') fallback. Keeps the
-// player on the themed page with validation instead of a browser dialog.
-function renderInlineJoin(presetName) {
-  el('status').textContent = `Room ${room || '???'} — enter your name to take a seat`;
+// QR join form: phones land here from the board QR (play.html?room=XXXX,
+// no name). Themed card with a big room pill, live seat roster, and a hard
+// block on duplicate names (case-insensitive) so the host never has to tell
+// two Adas apart. Board rendering untouched.
+let joinRosterUnsub = null;
+function renderInlineJoin(presetName, notice) {
+  try { if (joinRosterUnsub) { joinRosterUnsub(); joinRosterUnsub = null; } } catch (_) {}
+  el('status').textContent = room ? `You scanned room ${room}` : 'Enter your room and name';
   el('main').innerHTML = `
-    <form id="inlineJoinForm" novalidate>
-      <div class="field">
-        <label for="inlineName">Your name</label>
-        <input id="inlineName" type="text" placeholder="e.g. Ada" maxlength="20"
-          autocomplete="nickname" autocapitalize="words" spellcheck="false"
-          inputmode="text" enterkeyhint="go" />
-        <p id="inlineNameError" class="error field-error" aria-live="polite"></p>
+    <div class="join-card play-join-card">
+      ${room ? `<div class="room-pill" aria-label="Room ${escapeHtml(room)}">ROOM&nbsp;${escapeHtml(room)}</div>` : ''}
+      ${notice ? `<p class="error field-error" aria-live="polite">${escapeHtml(notice)}</p>` : ''}
+      <form id="inlineJoinForm" novalidate>
+        <div class="field">
+          <div class="field-row">
+            <label for="inlineName">Your name</label>
+            <span id="inlineNameCount" class="char-count" aria-hidden="true">0/20</span>
+          </div>
+          <input id="inlineName" type="text" placeholder="e.g. Ada" maxlength="20"
+            autocomplete="nickname" autocapitalize="words" spellcheck="false"
+            inputmode="text" enterkeyhint="go" aria-describedby="inlineNameError inlineNameCount" />
+          <p id="inlineNameError" class="error field-error" aria-live="polite"></p>
+        </div>
+        <button id="inlineJoinBtn" type="submit">Join Game</button>
+        <p id="inlineJoinStatus" class="muted join-status" aria-live="polite"></p>
+      </form>
+      <div class="roster-block">
+        <p class="muted roster-heading" id="rosterHeading">Checking the table…</p>
+        <ul id="joinRoster" class="roster-list" aria-live="polite"></ul>
       </div>
-      <button type="submit">Join Game</button>
-      <p class="muted join-switch"><a href="index.html${room ? `?room=${encodeURIComponent(room)}` : ''}">← Back to join screen</a></p>
-    </form>`;
+      <p class="muted join-switch">That's you on a new device?
+        <a href="play.html?room=${encodeURIComponent(room || '')}${presetName ? `&name=${encodeURIComponent(presetName)}` : ''}&reconnect=1">Reconnect with your code →</a>
+      </p>
+      <p class="muted join-switch"><a href="index.html${room ? `?room=${encodeURIComponent(room)}` : ''}">← Back to start screen</a></p>
+    </div>`;
   const input = document.getElementById('inlineName');
+  const errEl = document.getElementById('inlineNameError');
+  const countEl = document.getElementById('inlineNameCount');
+  const btn = document.getElementById('inlineJoinBtn');
+  const statusEl = document.getElementById('inlineJoinStatus');
+  const clean = v => (v || '').trim().replace(/\s+/g, ' ').slice(0, 20);
+  const paintCount = () => { countEl.textContent = `${clean(input.value).length}/20`; };
   if (presetName) input.value = presetName;
   try {
     const last = localStorage.getItem('sh_last_name');
     if (last && !input.value) input.value = last;
   } catch (_) {}
+  paintCount();
   input.focus({ preventScroll: true });
-  document.getElementById('inlineJoinForm').addEventListener('submit', e => {
+  input.addEventListener('input', () => {
+    paintCount();
+    if (clean(input.value).length >= 2) errEl.textContent = '';
+  });
+  input.addEventListener('blur', () => { input.value = clean(input.value); paintCount(); });
+
+  const rosterEl = document.getElementById('joinRoster');
+  const headingEl = document.getElementById('rosterHeading');
+  const paintRoster = players => {
+    const names = Object.values(players || {})
+      .map(p => (p && p.name) || '')
+      .map(n => n.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    headingEl.textContent = names.length
+      ? `${names.length} seated${names.length >= 10 ? ' — table is full' : ''}:`
+      : 'First to the table — grab a good seat.';
+    rosterEl.innerHTML = names.map(n => `<li class="roster-chip">${escapeHtml(n)}</li>`).join('');
+  };
+  if (room) {
+    // Room must exist (board created it) — fast fail before showing the form.
+    get(ref(db, `games/${room}/meta`)).then(snap => {
+      if (!snap.exists()) {
+        errEl.textContent = 'Room not found. Check the QR on the shared display.';
+        btn.disabled = true;
+        headingEl.textContent = '';
+      }
+    }).catch(() => {});
+    // Live roster while choosing a name; detached on successful join.
+    try {
+      joinRosterUnsub = onValue(ref(db, `games/${room}/players`), snap => {
+        paintRoster(snap.val() || {});
+      }, () => { headingEl.textContent = ''; });
+    } catch (_) { headingEl.textContent = ''; }
+  } else {
+    headingEl.textContent = '';
+  }
+
+  document.getElementById('inlineJoinForm').addEventListener('submit', async e => {
     e.preventDefault();
-    const clean = input.value.trim().replace(/\s+/g, ' ').slice(0, 20);
-    if (clean.length < 2) {
-      document.getElementById('inlineNameError').textContent = 'Enter a name (2+ letters).';
-      return;
+    const name = clean(input.value);
+    input.value = name; paintCount();
+    if (name.length < 2) { errEl.textContent = 'Enter a name (2+ letters).'; return; }
+    errEl.textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    statusEl.textContent = '';
+    // Fresh pre-flight: room-exists, full, duplicate (hard block).
+    try {
+      const metaSnap = await get(ref(db, `games/${room}/meta`));
+      if (!metaSnap.exists()) {
+        errEl.textContent = 'Room not found. Re-scan the QR on the shared display.';
+        btn.disabled = false; btn.textContent = 'Join Game';
+        return;
+      }
+      const playersSnap = await get(ref(db, `games/${room}/players`));
+      const players = playersSnap.val() || {};
+      if (Object.keys(players).length >= 10) {
+        errEl.textContent = 'Room is full (10 players max).';
+        btn.disabled = false; btn.textContent = 'Join Game';
+        return;
+      }
+      const taken = Object.values(players).some(p => ((p && p.name) || '').trim().toLowerCase() === name.toLowerCase());
+      if (taken) {
+        errEl.textContent = `"${name}" is already taken — pick another name.`;
+        btn.disabled = false; btn.textContent = 'Join Game';
+        return;
+      }
+    } catch (_) {
+      // Offline/read failure: fall through and let main() decide after join.
     }
     try {
-      localStorage.setItem('sh_last_name', clean);
+      localStorage.setItem('sh_last_name', name);
       if (room) localStorage.setItem('sh_last_room', room);
     } catch (_) {}
-    window.location.href = `play.html?room=${encodeURIComponent(room || '')}&name=${encodeURIComponent(clean)}`;
+    try { if (joinRosterUnsub) { joinRosterUnsub(); joinRosterUnsub = null; } } catch (_) {}
+    btn.textContent = 'Joining…';
+    window.location.href = `play.html?room=${encodeURIComponent(room || '')}&name=${encodeURIComponent(name)}`;
   });
 }
 

@@ -343,6 +343,17 @@ img { background: var(--panel); }
   text-underline-offset: 2px;
   cursor: pointer;
 }
+.host-section {
+  margin: 8px 0 4px;
+  padding: 14px;
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(201,168,76,0.07);
+  text-align: center;
+}
+.host-section h2 { border-bottom: none; padding-bottom: 0; margin: 0 0 4px; }
+.host-section p { margin: 0 0 10px; }
+.host-section button { min-height: 52px; font-size: 17px; }
 .host-details, .credits-details {
   margin-top: 16px;
   border-top: 1px dashed var(--border);
@@ -358,6 +369,55 @@ img { background: var(--panel); }
 }
 .host-details button { margin-top: 10px; }
 .credits-details p { font-size: 13px; }
+
+/* QR phone join card (play.html): same paper/dossier language as the start
+   page. Room pill is the anchor — big tracked code so the table can compare
+   at a glance. Roster is a live seat preview, nothing more. */
+.play-join-card { margin-top: 12px; }
+.play-join-card .field { margin: 12px 0 4px; }
+.play-join-card label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.play-join-card input { min-height: 48px; }
+.play-join-card button[type="submit"] { min-height: 48px; margin-top: 8px; }
+.room-pill {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  letter-spacing: 0.35em;
+  text-indent: 0.35em;
+  color: var(--ink);
+  background: var(--paper);
+  border-bottom: 2px solid #000;
+  padding: 10px 8px;
+  margin-bottom: 4px;
+}
+.roster-block { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.roster-heading { margin: 0 0 8px; }
+.roster-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.roster-chip {
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: var(--bg-paper);
+  border: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
 
 /* Board layout */
 .board-wrap {
