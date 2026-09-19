@@ -320,6 +320,8 @@ function handlePhaseEnter(phase) {
   if (phase === 'executive_action') {
     watchForExecutiveAction();
     narrateExecutiveIntro(roundId);
+    // Host juice: power callout (view-only, non-blocking so the President can act).
+    try { showPowerCalloutCinematic(currentMeta.pendingPower); } catch (_) {}
     narrateDelayed(`pow-wait-${roundId}`, 'narr_36', 25000, () => stillIn('executive_action', roundId));
   }
 }
@@ -346,6 +348,357 @@ function narrateEnactment(tile, newVal) {
     narrate('narr_29');
     narrate('narr_30');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Cinematic engine (host view-only). All functions are safe to call from any
+// claim-winner path; they never write game state and always resolve (with a
+// timeout fallback) so the game can never wedge on animation.
+// ---------------------------------------------------------------------------
+const CINEMATIC_MS = 2300;
+const TALLY_MS = 1900;
+const CALLOUT_MS = 1800;
+
+function prefersReducedMotion() {
+  try {
+    return (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)
+      || document.body.classList.contains('reduced');
+  } catch (_) { return false; }
+}
+
+function cinematicEls() {
+  return {
+    overlay: el('enactOverlay'),
+    bigImg: el('enactImg'),
+    cap: el('enactCap'),
+    ribbon: el('enactRibbon'),
+    tallyBar: el('tallyBar'),
+    tallyResult: el('tallyResult'),
+    powerBox: el('powerCallout'),
+    win: el('winTakeover'),
+    winTitle: el('winTitle'),
+    winSub: el('winSub'),
+    confetti: el('winConfetti'),
+    table: el('table'),
+    execFlash: el('execFlash'),
+  };
+}
+
+// The slot currently flying onto a board. While set, paintTileLayer keeps
+// that one slot EMPTY (pulsing outline) even though meta already counts the
+// policy — the tile only appears when the flyer lands. View-only; meta is
+// always the source of truth, so a refresh mid-flight just paints final.
+let pendingEnact = null; // { kind: 'liberal'|'fascist', count: n } | null
+
+// Execution cinematic state. Persisted through re-renders (which wipe seat
+// DOM) so Firebase updates mid-cinematic can't erase the crosshair/blood.
+let execState = null; // { uid, stage: 'lock'|'shot'|'aftermath', isHitler } | null
+
+function resetCinematic() {
+  const { overlay, win, tallyBar, tallyResult, powerBox, ribbon } = cinematicEls();
+  if (overlay) overlay.classList.remove('show', 'direct');
+  try {
+    document.body.classList.remove('enact-focus-liberal', 'enact-focus-fascist');
+    if (win) win.classList.remove('show');
+  } catch (_) {}
+  const table = el('table');
+  if (table) table.classList.remove('shake');
+  if (tallyBar) { tallyBar.style.display = 'none'; tallyBar.innerHTML = ''; }
+  if (tallyResult) tallyResult.textContent = '';
+  if (powerBox) { powerBox.style.display = 'none'; powerBox.innerHTML = ''; }
+  if (ribbon) ribbon.style.display = 'none';
+}
+
+// Deck → slot flight for the direct-to-board cinematic. The board stays
+// ZOOMED for the whole flight; un-zoom happens on settle, not here.
+function flyDeckToSlot(kind, count, onLanded) {
+  try {
+    const layer = el(kind === 'liberal' ? 'liberalTiles' : 'fascistTiles');
+    const deckEl = el('policyFan') || el('policyWell');
+    const spot = layer && layer.children[count - 1];
+    if (!layer || !deckEl || !spot) { if (onLanded) onLanded(); return; }
+    const from = deckEl.getBoundingClientRect();
+    const to = spot.getBoundingClientRect();
+    if (!from.width || !to.width) { if (onLanded) onLanded(); return; }
+    const flyer = document.createElement('div');
+    flyer.className = 'enact-flyer direct-flyer';
+    flyer.innerHTML = `<img src="img/tile-${kind}.png" alt="" />`;
+    const startW = Math.max(44, Math.min(90, from.width / 3 || 60));
+    flyer.style.left = `${from.left + from.width / 2 - startW / 2}px`;
+    flyer.style.top = `${from.top + from.height / 2 - (startW * 1.24) / 2}px`;
+    flyer.style.width = `${startW}px`;
+    document.body.appendChild(flyer);
+    const fromCx = from.left + from.width / 2, fromCy = from.top + from.height / 2;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const dx = to.left + to.width / 2 - fromCx;
+      const dy = to.top + to.height / 2 - fromCy;
+      flyer.style.transform = `translate(${dx}px,${dy}px) rotate(6deg)`;
+      flyer.style.width = `${to.width}px`;
+      flyer.style.opacity = '0.98';
+    }));
+    setTimeout(() => { flyer.remove(); if (onLanded) onLanded(); }, 1150);
+  } catch (_) { if (onLanded) onLanded(); }
+}
+
+const POWER_LABELS = {
+  policy_peek: 'Policy peek unlocked',
+  investigate_loyalty: 'Investigate loyalty unlocked',
+  special_election: 'Special election unlocked',
+  execution: 'Execution unlocked',
+};
+
+// Blocking enactment cinematic, direct-to-board (~2.6s; fast reduced-motion).
+// No center hold: caption docks top, board zooms, tile flies deck → slot and
+// the slot fills exactly ON LANDING via pendingEnact (see paintTileLayer).
+function playEnactCinematic(tile, count, { chaos = false, powerLabel = null } = {}) {
+  const { overlay, cap, ribbon, tallyBar, tallyResult, powerBox, table } = cinematicEls();
+  if (!overlay || !cap) return Promise.resolve();
+  const isLib = tile === 'liberal';
+  resetCinematic();
+  pendingEnact = { kind: tile, count };
+  cap.style.display = '';
+  cap.className = `enact-caption ${isLib ? 'liberal-cap' : 'fascist-cap'}`;
+  const boardWord = isLib ? 'liberal' : 'fascist';
+  const capTitle = isLib ? 'Liberal' : 'Fascist';
+  cap.innerHTML = `${capTitle} ${count}<small>${chaos ? 'Chaos — top tile auto-enacts' : `Placing on the ${boardWord} board…`}</small>`;
+  if (ribbon) {
+    if (powerLabel) { ribbon.textContent = powerLabel; ribbon.style.display = 'inline-block'; }
+    else ribbon.style.display = 'none';
+  }
+  if (tallyBar) tallyBar.style.display = 'none';
+  if (tallyResult) tallyResult.textContent = '';
+  if (powerBox) powerBox.style.display = 'none';
+  try { document.body.classList.add(isLib ? 'enact-focus-liberal' : 'enact-focus-fascist'); } catch (_) {}
+  if (chaos && table) {
+    table.classList.remove('shake');
+    void table.offsetWidth;
+    table.classList.add('shake');
+    setTimeout(() => table.classList.remove('shake'), 600);
+  }
+  paintBoardOverlays(); // show the pulsing target outline immediately
+  overlay.classList.add('show', 'direct');
+  if (prefersReducedMotion()) {
+    return new Promise(res => setTimeout(() => { pendingEnact = null; resetCinematic(); paintBoardOverlays(); res(); }, 200));
+  }
+  const boardEl = tile === 'liberal' ? el('liberalBoard') : el('fascistBoard');
+  // Launch the deck→slot flight on the next frames so the zoom applies first.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    flyDeckToSlot(tile, count, () => {
+      pendingEnact = null;
+      paintBoardOverlays();
+      const layer = el(tile === 'liberal' ? 'liberalTiles' : 'fascistTiles');
+      const landed = layer && layer.children[count - 1];
+      if (landed) {
+        landed.classList.add('just-landed');
+        setTimeout(() => landed.classList.remove('just-landed'), 600);
+      }
+      if (boardEl) {
+        boardEl.classList.add(tile === 'liberal' ? 'just-enacted-liberal' : 'just-enacted-fascist');
+        setTimeout(() => boardEl.classList.remove('just-enacted-liberal', 'just-enacted-fascist'), 700);
+      }
+      cap.innerHTML = `${capTitle} ${count}<small>Placed</small>`;
+    });
+  }));
+  // Hold the zoom briefly after landing so the placement reads, then settle.
+  return new Promise(res => {
+    const done = () => { pendingEnact = null; resetCinematic(); paintBoardOverlays(); res(); };
+    setTimeout(done, CINEMATIC_MS + 300);
+    setTimeout(done, CINEMATIC_MS + 1800); // backstop
+  });
+}
+
+// Blocking election tally (~1.9s). votes is {ja, total} or an array of 'ja'/'nein'.
+function showTallyCinematic({ ja = 0, total = 0, passed = false, nomineeName = '' } = {}) {
+  const { overlay, bigImg, cap, ribbon, tallyBar, tallyResult, powerBox } = cinematicEls();
+  if (!overlay || !tallyBar) return Promise.resolve();
+  resetCinematic();
+  if (bigImg) { bigImg.src = 'img/ballot-ja.png'; bigImg.style.display = ''; }
+  if (cap) {
+    cap.style.display = '';
+    cap.className = 'enact-caption';
+    cap.innerHTML = `Vote${nomineeName ? ` — ${nomineeName}` : ''}<small>The table votes</small>`;
+  }
+  if (ribbon) ribbon.style.display = 'none';
+  if (powerBox) powerBox.style.display = 'none';
+  tallyBar.style.display = 'flex';
+  tallyBar.innerHTML = '';
+  if (tallyResult) { tallyResult.textContent = ''; tallyResult.style.color = ''; }
+  overlay.classList.add('show');
+  if (prefersReducedMotion()) {
+    if (tallyResult) {
+      tallyResult.textContent = `${ja} Ja — ${passed ? 'Elected!' : 'Rejected'}`;
+      tallyResult.style.color = passed ? '#6fd68b' : '#ff9a8a';
+    }
+    return new Promise(res => setTimeout(() => { resetCinematic(); res(); }, 250));
+  }
+  const segs = [];
+  for (let i = 0; i < Math.max(0, total); i++) {
+    const s = document.createElement('div');
+    s.className = `tally-seg ${i < ja ? 'ja' : 'nein'}`;
+    tallyBar.appendChild(s);
+    segs.push(s);
+  }
+  segs.forEach((s, i) => setTimeout(() => s.classList.add('on'), 250 + i * 110));
+  const resultAt = 250 + segs.length * 110 + 250;
+  setTimeout(() => {
+    if (tallyResult) {
+      tallyResult.textContent = `${ja} Ja — ${passed ? 'Elected!' : 'Rejected'}`;
+      tallyResult.style.color = passed ? '#6fd68b' : '#ff9a8a';
+    }
+  }, resultAt);
+  return new Promise(res => {
+    setTimeout(() => { resetCinematic(); res(); }, Math.max(TALLY_MS, resultAt + 500));
+    setTimeout(() => { resetCinematic(); res(); }, TALLY_MS + 3000);
+  });
+}
+
+// Non-blocking power intro (~1.8s, fire-and-forget).
+function showPowerCalloutCinematic(power) {
+  try {
+    const { overlay, bigImg, cap, ribbon, tallyBar, tallyResult, powerBox } = cinematicEls();
+    if (!overlay || !powerBox) return;
+    if (overlay.classList.contains('show')) return; // don't stomp an enactment
+    resetCinematic();
+    if (bigImg) bigImg.style.display = 'none';
+    if (cap) cap.style.display = 'none';
+    if (ribbon) ribbon.style.display = 'none';
+    if (tallyBar) tallyBar.style.display = 'none';
+    if (tallyResult) tallyResult.textContent = '';
+    const titles = {
+      execution: ['◎', 'Execution', 'The President must eliminate one player.'],
+      investigate_loyalty: ['◉', 'Investigate Loyalty', 'The President learns one party membership.'],
+      special_election: ['★', 'Special Election', 'The President names the next President.'],
+      policy_peek: ['▤', 'Policy Peek', 'The President sees the top 3 tiles.'],
+    };
+    const [glyph, title, sub] = titles[power] || ['⚡', 'Presidential Power', ''];
+    powerBox.innerHTML = `<div class="crosshair" aria-hidden="true">${glyph}</div><h2>${title}</h2><p class="muted">${sub}</p>`;
+    powerBox.style.display = 'block';
+    overlay.classList.add('show');
+    const hide = () => { try { overlay.classList.remove('show'); powerBox.style.display = 'none'; } catch (_) {} };
+    setTimeout(hide, prefersReducedMotion() ? 300 : CALLOUT_MS);
+  } catch (_) {}
+}
+
+// Blocking veto drama (~1.5s).
+function showVetoCinematic(tracker) {
+  const { overlay, bigImg, cap, ribbon, tallyBar, tallyResult, powerBox } = cinematicEls();
+  if (!overlay || !bigImg || !cap) return Promise.resolve();
+  resetCinematic();
+  bigImg.style.display = '';
+  cap.style.display = '';
+  bigImg.src = 'img/back-tile.png';
+  cap.className = 'enact-caption';
+  cap.innerHTML = `Veto agreed<small>Both tiles discarded · tracker ${tracker}</small>`;
+  if (ribbon) ribbon.style.display = 'none';
+  if (tallyBar) tallyBar.style.display = 'none';
+  if (tallyResult) tallyResult.textContent = '';
+  if (powerBox) powerBox.style.display = 'none';
+  overlay.classList.add('show');
+  return new Promise(res => {
+    setTimeout(() => { resetCinematic(); res(); }, prefersReducedMotion() ? 250 : 1500);
+    setTimeout(() => { resetCinematic(); res(); }, 3000);
+  });
+}
+
+const WIN_SUBS = {
+  five_liberal_policies: 'Five liberal policies',
+  six_fascist_policies: 'Six fascist policies',
+  hitler_elected_chancellor: 'Hitler elected Chancellor',
+  hitler_executed: 'Hitler executed',
+};
+
+// ---------------------------------------------------------------------------
+// Execution cinematic: lock → shot → aftermath (~2.9s, blocking).
+// View-only staging via execState so Firebase re-renders mid-cinematic can't
+// wipe the crosshair/blood (seatHtml repaints decorations from execState).
+// The victim's `alive=false` write lands ON THE SHOT, so the seat only dies
+// when the room sees it happen. Dead seats keep blood + stamp + tomb.
+// ---------------------------------------------------------------------------
+function playExecutionCinematic(targetUid, { isHitler = false, victimName = '?', onShot = null } = {}) {
+  const { execFlash, table } = cinematicEls();
+  const reduced = prefersReducedMotion();
+  const stageMs = reduced ? { lock: 150, shot: 300, settle: 700 } : { lock: 850, shot: 1450, settle: 2900 };
+  resetCinematic();
+  try { document.body.classList.add('exec-active'); } catch (_) {}
+  execState = { uid: targetUid, stage: 'lock', isHitler };
+  paintSeats();
+  playSound('execution');
+  const fireShot = () => {
+    // The victim dies exactly on this frame: alive=false paints through
+    // seatHtml (dead + blood), so the room sees cause and effect together.
+    if (typeof onShot === 'function') {
+      try { onShot(); } catch (e) { console.warn('[board] exec onShot failed:', e && e.message); }
+    }
+  };
+  if (reduced) {
+    return (async () => {
+      await new Promise(res => setTimeout(res, stageMs.lock));
+      fireShot();
+      execState = { uid: targetUid, stage: 'aftermath', isHitler };
+      paintSeats();
+      await new Promise(res => setTimeout(res, stageMs.settle));
+      execState = null;
+      try { document.body.classList.remove('exec-active'); } catch (_) {}
+      paintSeats();
+    })();
+  }
+  return (async () => {
+    await new Promise(res => setTimeout(res, stageMs.lock));
+    // THE SHOT: flash + kick + blood. The caller writes alive=false here.
+    if (execFlash) {
+      execFlash.classList.remove('fire');
+      void execFlash.offsetWidth;
+      execFlash.classList.add('fire');
+    }
+    if (table) {
+      table.classList.remove('shake');
+      void table.offsetWidth;
+      table.classList.add('shake');
+      setTimeout(() => table.classList.remove('shake'), 550);
+    }
+    playSound('enact-fascist');
+    execState = { uid: targetUid, stage: 'shot', isHitler };
+    paintSeats();
+    fireShot();
+    await new Promise(res => setTimeout(res, stageMs.shot - stageMs.lock));
+    // AFTERMATH: stamp + tomb rise.
+    execState = { uid: targetUid, stage: 'aftermath', isHitler };
+    paintSeats();
+    playSound('scream');
+    await new Promise(res => setTimeout(res, stageMs.settle - stageMs.shot));
+    execState = null;
+    try { document.body.classList.remove('exec-active'); } catch (_) {}
+    paintSeats();
+  })();
+}
+
+// Persistent win takeover (stays until next game; render() re-asserts on refresh).
+function showWinTakeover(winner, reason) {
+  try {
+    const { win, winTitle, winSub, confetti } = cinematicEls();
+    if (!win) return;
+    resetCinematic();
+    win.classList.remove('liberal', 'fascist');
+    win.classList.add(winner === 'liberal' ? 'liberal' : 'fascist');
+    if (winTitle) winTitle.textContent = winner === 'liberal' ? 'Liberals win!' : 'Fascists win!';
+    if (winSub) winSub.textContent = WIN_SUBS[reason] || String(reason || '');
+    if (confetti) {
+      confetti.innerHTML = '';
+      const colors = winner === 'liberal'
+        ? ['#3b6fd6', '#9db9ff', '#ffd75e', '#ffffff']
+        : ['#a3282f', '#ff9a8a', '#ffd75e', '#000000'];
+      for (let i = 0; i < 60; i++) {
+        const s = document.createElement('span');
+        s.style.left = `${Math.random() * 100}%`;
+        s.style.background = colors[i % colors.length];
+        s.style.animationDuration = `${2 + Math.random() * 3}s`;
+        s.style.animationDelay = `${Math.random() * 2}s`;
+        confetti.appendChild(s);
+      }
+    }
+    win.classList.add('show');
+    win.setAttribute('aria-hidden', 'false');
+  } catch (_) {}
 }
 
 // The Chancellor's veto request lives under secret/legislative, not meta, so it
@@ -396,6 +749,23 @@ async function claim(key) {
     console.warn(`[claim ${key}] failed:`, e && e.message);
     return false;
   }
+}
+
+async function releaseClaim(key) {
+  try {
+    await update(ref(db, `games/${room}`), { [`secret/claims/${key}`]: null });
+  } catch (_) {}
+}
+
+// Official rule: only living, non-retired seats can hold office, be
+// nominated, or be targeted by powers. Missing fields count as eligible
+// (legacy nodes carry no retired flag); explicit false/true disqualifies.
+function isSeatEligible(p) {
+  return !!p && p.alive !== false && p.retired !== true;
+}
+
+async function freshPlayers() {
+  return (await get(ref(db, `games/${room}/players`))).val() || {};
 }
 
 function watchForNightAcks() {
@@ -468,18 +838,18 @@ function watchForNomination() {
     const m = await freshMeta();
     if (m.phase !== 'nomination' || (m.roundId || 0) !== entryRound) return;
     // Server-side eligibility re-check: phones filter the nominee list, but a
-    // stale client can nominate a term-limited/dead player. Reject by clearing
+    // stale client can nominate a term-limited/dead/retired player. Reject by clearing
     // the candidate and staying subscribed for a corrected nomination.
     // (Claim only after validation, so the retry isn't blocked by our claim.)
     const order = m.playerOrder || [];
-    const aliveCount = order.filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false && currentPlayers[uid].retired !== true).length;
+    const freshP = await freshPlayers();
+    const aliveCount = order.filter(uid => isSeatEligible(freshP[uid])).length;
     const ineligible = ineligibleChancellorCandidates({
       lastPresidentUid: m.presidentUidLast,
       lastChancellorUid: m.chancellorUidLast,
       aliveCount,
     });
-    const nominatedAlive = currentPlayers[candidate] && currentPlayers[candidate].alive !== false;
-    if (!nominatedAlive || candidate === m.presidentUid || ineligible.has(candidate)) {
+    if (!isSeatEligible(freshP[candidate]) || candidate === m.presidentUid || ineligible.has(candidate)) {
       console.warn(`[board] rejecting ineligible nominee ${candidate}, waiting for a legal one`);
       await update(metaRef, { chancellorCandidateUid: null });
       return;
@@ -506,6 +876,11 @@ function watchForVotes() {
     if (Object.keys(cast).length < alive.length) return;
     const m = await freshMeta();
     if (m.phase !== 'election' || (m.roundId || 0) !== roundId) return;
+    // Recompute quorum from fresh players: seats may have died/retired or
+    // been reclaimed mid-round since this watcher subscribed.
+    const fp = await freshPlayers();
+    const freshAlive = (m.playerOrder || []).filter(uid => isSeatEligible(fp[uid]));
+    if (Object.keys(cast).length < freshAlive.length) return;
     const revealed = await get(ref(db, `games/${room}/votesRevealed/${roundId}`));
     if (revealed.val() === true) return;
     if (!(await claim(`election-${roundId}`))) return;
@@ -515,8 +890,8 @@ function watchForVotes() {
     const votesSnap = await get(ref(db, `games/${room}/votes/${roundId}`));
     const votes = votesSnap.val() || {};
     const jaCount = Object.values(votes).filter(v => v === 'ja').length;
-    const majority = jaCount > alive.length / 2;
-    await resolveElection(majority, m);
+    const majority = jaCount > freshAlive.length / 2;
+    await resolveElection(majority, m, { ja: jaCount, total: freshAlive.length, votes });
   });
 }
 
@@ -537,17 +912,28 @@ async function forceResolveElection() {
   await set(ref(db, `games/${room}/votesRevealed/${roundId}`), true);
   const votesSnap = await get(ref(db, `games/${room}/votes/${roundId}`));
   const votes = votesSnap.val() || {};
-  const aliveCount = (m.playerOrder || []).filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false && currentPlayers[uid].retired !== true).length;
+  const fpForce = await freshPlayers();
+  const aliveCount = (m.playerOrder || []).filter(uid => isSeatEligible(fpForce[uid])).length;
   const jaCount = Object.values(votes).filter(v => v === 'ja').length;
-  await resolveElection(jaCount > aliveCount / 2, m);
+  await resolveElection(jaCount > aliveCount / 2, m, { ja: jaCount, total: aliveCount, votes });
 }
 
-async function resolveElection(majority, fresh) {
+async function resolveElection(majority, fresh, tally = {}) {
   // `fresh` is the meta snapshot re-read by the caller after the phase guard;
   // all arithmetic below uses it (never the render cache) so increments can't
   // be computed from stale state. Single-flight claims already serialize
   // writers, so fresh-read-modify-write is safe without transactions.
   const base = fresh || currentMeta;
+  // Host juice: animated Ja/Nein tally before the outcome lands. View-only and
+  // timeout-guarded — a failure here must never block the election.
+  try {
+    const nominee = currentPlayers[base.chancellorCandidateUid]?.name
+      || (await freshPlayers())[base.chancellorCandidateUid]?.name || '';
+    await Promise.race([
+      showTallyCinematic({ ja: tally.ja || 0, total: tally.total || 0, passed: !!majority, nomineeName: nominee }),
+      new Promise(res => setTimeout(res, TALLY_MS + 1200)),
+    ]);
+  } catch (_) { resetCinematic(); }
   if (!majority) {
     const tracker = (base.electionTracker || 0) + 1;
     if (tracker >= 3) {
@@ -628,6 +1014,13 @@ async function runChaos(fresh) {
   });
   narrateEnactment(tile, newVal);
   narrate('narr_19');
+  // Host juice: chaos cinematic (view-only, timeout-guarded).
+  try {
+    await Promise.race([
+      playEnactCinematic(tile, newVal, { chaos: true }),
+      new Promise(res => setTimeout(res, CINEMATIC_MS + 1200)),
+    ]);
+  } catch (_) { resetCinematic(); }
   const win = checkWin({ liberalTrack: trackField === 'liberalTrack' ? newVal : base.liberalTrack, fascistTrack: fascistNow });
   if (win) {
     await endGame(win);
@@ -685,14 +1078,15 @@ async function reshuffleIfShort() {
   });
 }
 
-function nextAliveAfter(uid) {
-  const order = currentMeta.playerOrder || [];
+async function nextAliveAfter(uid, orderOverride, playersOverride) {
+  const order = orderOverride || currentMeta.playerOrder || [];
   if (!order.length) return null;
+  const players = playersOverride || currentPlayers;
   let idx = order.indexOf(uid);
   for (let i = 0; i < order.length; i++) {
     idx = (idx + 1) % order.length;
     const cand = order[idx];
-    if (!currentPlayers[cand] || currentPlayers[cand].alive !== false) return cand;
+    if (isSeatEligible(players[cand])) return cand;
   }
   return null;
 }
@@ -700,13 +1094,20 @@ function nextAliveAfter(uid) {
 // snapshotLasts=false is for FAILED elections: per the rules, term limits
 // track the last ELECTED government, so a rejected nomination must rotate
 // the presidency without touching presidentUidLast/chancellorUidLast.
+// Agreed vetos (no government elected) use false as well.
 async function advancePresidency(snapshotLasts = true) {
+  // Re-read fresh state: cached currentMeta/currentPlayers can be stale
+  // across concurrent execution/reclaim updates, which would rotate to the
+  // wrong president or snapshot the wrong lasts.
+  const m = await freshMeta();
+  const players = await freshPlayers();
+  const order = m.playerOrder || [];
   // If the term just ended was a special-elected presidency, return to the
   // stored next-in-line (left of the President who enacted the Special Election).
-  if (currentMeta.specialElectionReturnUid) {
-    let next = currentMeta.specialElectionReturnUid;
-    if (currentPlayers[next] && currentPlayers[next].alive === false) {
-      next = nextAliveAfter(next) || nextAliveAfter(currentMeta.presidentUid);
+  if (m.specialElectionReturnUid) {
+    let next = m.specialElectionReturnUid;
+    if (!isSeatEligible(players[next])) {
+      next = await nextAliveAfter(next, order, players) || await nextAliveAfter(m.presidentUid, order, players);
     }
     const updates = {
       presidentUid: next,
@@ -716,20 +1117,25 @@ async function advancePresidency(snapshotLasts = true) {
       phase: 'nomination',
     };
     if (snapshotLasts) {
-      updates.presidentUidLast = currentMeta.presidentUid;
-      updates.chancellorUidLast = currentMeta.chancellorUid || null;
+      updates.presidentUidLast = m.presidentUid;
+      updates.chancellorUidLast = m.chancellorUid || null;
     }
     await update(metaRef, updates);
     return;
   }
-  const order = currentMeta.playerOrder || [];
-  const currentIdx = order.indexOf(currentMeta.presidentUid);
+  const currentIdx = order.indexOf(m.presidentUid);
   let nextIdx = currentIdx;
-  let next;
-  do {
+  let next = null;
+  for (let i = 0; i < order.length; i++) {
     nextIdx = (nextIdx + 1) % order.length;
     next = order[nextIdx];
-  } while (currentPlayers[next] && currentPlayers[next].alive === false);
+    if (isSeatEligible(players[next])) break;
+    next = null;
+  }
+  if (!next) {
+    console.warn('[board] advancePresidency: no eligible successor, staying put');
+    return;
+  }
   const updates = {
     presidentUid: next,
     chancellorCandidateUid: null,
@@ -737,8 +1143,8 @@ async function advancePresidency(snapshotLasts = true) {
     phase: 'nomination',
   };
   if (snapshotLasts) {
-    updates.presidentUidLast = currentMeta.presidentUid;
-    updates.chancellorUidLast = currentMeta.chancellorUid || null;
+    updates.presidentUidLast = m.presidentUid;
+    updates.chancellorUidLast = m.chancellorUid || null;
   }
   await update(metaRef, updates);
 }
@@ -768,29 +1174,38 @@ function watchForPresidentChoice() {
     if (idx === null || idx === undefined) return;
     const m = await freshMeta();
     if (m.phase !== 'legislative_president' || (m.roundId || 0) !== roundId) return;
-    if (!(await claim(`preschoice-${roundId}`))) return;
-    done = true;
-    if (typeof unsub === 'function') unsub();
+    // Validate BEFORE claiming so a corrupt/out-of-range choice clears the
+    // idx node and stays subscribed for a legal retry instead of wedging
+    // the round with done=true and no retry path.
     const drawSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/presidentDraw`));
     const draw = asTiles(drawSnap.val());
     if (!draw.length || !draw.every(isTile)) {
-      console.warn(`[board] round ${roundId}: presidentDraw missing/corrupt, ignoring choice`);
+      console.warn(`[board] round ${roundId}: presidentDraw missing/corrupt, clearing choice for retry`);
+      await update(ref(db, `games/${room}`), { [`secret/legislative/${roundId}/presidentDiscardIdx`]: null });
       return;
     }
     if (idx === -1) {
       if (draw.length > 1) {
-        console.warn(`[board] round ${roundId}: pass-through with ${draw.length} tiles, ignoring`);
+        console.warn(`[board] round ${roundId}: pass-through with ${draw.length} tiles, clearing choice`);
+        await update(ref(db, `games/${room}`), { [`secret/legislative/${roundId}/presidentDiscardIdx`]: null });
         return;
       }
+      if (!(await claim(`preschoice-${roundId}`))) return;
+      done = true;
+      if (typeof unsub === 'function') unsub();
       await update(ref(db, `games/${room}`), {
         [`secret/legislative/${roundId}/chancellorHand`]: draw,
       });
       return;
     }
     if (!Number.isInteger(idx) || idx < 0 || idx >= draw.length) {
-      console.warn(`[board] round ${roundId}: presidentDiscardIdx ${idx} out of range, ignoring`);
+      console.warn(`[board] round ${roundId}: presidentDiscardIdx ${idx} out of range, clearing choice`);
+      await update(ref(db, `games/${room}`), { [`secret/legislative/${roundId}/presidentDiscardIdx`]: null });
       return;
     }
+    if (!(await claim(`preschoice-${roundId}`))) return;
+    done = true;
+    if (typeof unsub === 'function') unsub();
     const remaining = draw.filter((_, i) => i !== idx);
     await appendToDiscard([draw[idx]]);
     await update(ref(db, `games/${room}`), {
@@ -824,17 +1239,19 @@ function watchForChancellorEnact() {
     if (idx === null || idx === undefined) return;
     const m = await freshMeta();
     if (m.phase !== 'legislative_chancellor' || (m.roundId || 0) !== roundId) return;
-    if (!(await claim(`enact-${roundId}`))) return;
-    done = true;
-    if (typeof unsub === 'function') unsub();
     // Resolve the index against the hand the board dealt — the Chancellor's
     // client never writes tiles directly, so a forged enactment is impossible.
+    // Validate before claiming so an invalid idx clears and stays subscribed.
     const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
     const hand = asTiles(handSnap.val());
     if (!Number.isInteger(idx) || idx < 0 || idx >= hand.length || !hand.every(isTile)) {
-      console.warn(`[board] round ${roundId}: chancellorEnactIdx ${idx} invalid for hand of ${hand.length}, ignoring`);
+      console.warn(`[board] round ${roundId}: chancellorEnactIdx ${idx} invalid for hand of ${hand.length}, clearing for retry`);
+      await update(ref(db, `games/${room}`), { [`secret/legislative/${roundId}/chancellorEnactIdx`]: null });
       return;
     }
+    if (!(await claim(`enact-${roundId}`))) return;
+    done = true;
+    if (typeof unsub === 'function') unsub();
     const tile = hand[idx];
     await appendToDiscard(hand.filter((_, i) => i !== idx));
     playSound(tile === 'liberal' ? 'enact-liberal' : 'enact-fascist');
@@ -861,6 +1278,19 @@ function watchForChancellorEnact() {
     }
     // End-of-session reshuffle so the deck stays >= 3 (keeps Policy Peek honest).
     await reshuffleIfShort().catch(e => console.warn('[board] reshuffle failed:', e && e.message));
+
+    // Host juice: full enactment cinematic (view-only, timeout-guarded) before
+    // the game advances, so the room actually sees the tile land.
+    try {
+      const upcomingPower = field === 'fascistTrack'
+        ? executivePowerFor((m.playerOrder || []).length, newVal) : null;
+      const powerLabel = unlock ? 'Veto power unlocked'
+        : upcomingPower ? POWER_LABELS[upcomingPower] : null;
+      await Promise.race([
+        playEnactCinematic(tile, newVal, { powerLabel }),
+        new Promise(res => setTimeout(res, CINEMATIC_MS + 1200)),
+      ]);
+    } catch (_) { resetCinematic(); }
 
     const win = checkWin({
       liberalTrack: field === 'liberalTrack' ? newVal : m.liberalTrack,
@@ -908,27 +1338,43 @@ function watchForVeto() {
       return;
     }
     if (decision !== 'agreed') return;
+    // Validate the hand BEFORE claiming: an invalid hand must clear the
+    // decision and stay subscribed so a legal retry can proceed (claiming
+    // first would wedge the round with done=true and no retry path).
+    const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
+    const handVal = handSnap.val();
+    const tiles = asTiles(handVal);
+    if (tiles.length !== 2 || !tiles.every(isTile)) {
+      console.warn(`[board] round ${roundId}: veto with invalid hand, clearing decision for retry`);
+      await update(ref(db, `games/${room}`), { [`secret/legislative/${roundId}/vetoDecision`]: null });
+      return;
+    }
     if (!(await claim(`veto-${roundId}`))) return;
     // Backstop: a veto answered after a refusal (forged re-request — the
     // rules already block the write, but never trust the client alone).
     const usedSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/vetoUsed`));
     if (usedSnap.val() === true) {
       console.warn(`[board] round ${roundId}: ignoring veto decision after refusal`);
+      await releaseClaim(`veto-${roundId}`);
       return;
     }
     done = true;
     if (typeof unsub === 'function') unsub();
     playSound('election-fail'); // agreed veto: both tiles dead, tracker advances
     narrate('narr_45');
-    const handSnap = await get(ref(db, `games/${room}/secret/legislative/${roundId}/chancellorHand`));
-    const hand = handSnap.val();
-    const tiles = Array.isArray(hand) ? hand : Object.values(hand || {});
     const discSnap = await get(ref(db, `games/${room}/secret/discard`));
     const discVal = discSnap.val();
     const discard = (Array.isArray(discVal) ? discVal : Object.values(discVal || {})).concat(tiles);
     const tracker = (m.electionTracker || 0) + 1;
     await update(ref(db, `games/${room}`), { 'secret/discard': discard });
     await reshuffleIfShort().catch(e => console.warn('[board] reshuffle failed:', e && e.message));
+    // Host juice: veto drama before the tracker/chaos lands.
+    try {
+      await Promise.race([
+        showVetoCinematic(tracker),
+        new Promise(res => setTimeout(res, 2700)),
+      ]);
+    } catch (_) { resetCinematic(); }
     if (tracker >= 3) {
       const win = await runChaos(m);
       if (win) return;
@@ -936,7 +1382,10 @@ function watchForVeto() {
       return;
     }
     await update(metaRef, { electionTracker: tracker });
-    advancePresidency().catch(e => console.warn('[board] advance failed:', e && e.message));
+    // Agreed veto elects no government, so term limits must NOT snapshot
+    // (same as a failed election) — otherwise the next nomination
+    // over-blocks legal candidates.
+    advancePresidency(false).catch(e => console.warn('[board] advance failed:', e && e.message));
   });
 }
 
@@ -954,10 +1403,10 @@ async function watchForExecutiveAction() {
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'execution') return;
       // Server-side target validation: phones filter the list, but a stale or
-      // forged client can send self/dead/unknown. Reject and stay subscribed.
+      // forged client can send self/dead/retired/unknown. Reject and stay subscribed.
       // (Validate before claiming, so the retry isn't blocked by our claim.)
-      const targetAlive = currentPlayers[target] && currentPlayers[target].alive !== false;
-      if (!targetAlive || target === m.presidentUid) {
+      const playersExec = await freshPlayers();
+      if (!isSeatEligible(playersExec[target]) || target === m.presidentUid) {
         console.warn(`[board] rejecting invalid execution target ${target}, waiting for a legal one`);
         await update(metaRef, { executionTarget: null });
         return;
@@ -967,12 +1416,42 @@ async function watchForExecutiveAction() {
       if (typeof unsub === 'function') unsub();
       const rolesSnap = await get(ref(db, `games/${room}/secret/roles`));
       const roles = rolesSnap.val() || {};
-      playSound('execution');
-      await update(ref(db, `games/${room}`), {
-        [`players/${target}/alive`]: false,
-        'meta/executionTarget': null,
-        'meta/pendingPower': null,
-      });
+      const victimName = (playersExec[target] && playersExec[target].name) || '?';
+      const hitlerDown = roles[target] === 'hitler';
+      // Host juice: murder cinematic (view-only, timeout-guarded). The
+      // alive=false write fires ON THE SHOT via onShot so cause = effect.
+      try {
+        await Promise.race([
+          playExecutionCinematic(target, {
+            isHitler: hitlerDown,
+            victimName,
+            onShot: () => {
+              update(ref(db, `games/${room}`), {
+                [`players/${target}/alive`]: false,
+                'meta/executionTarget': null,
+                'meta/pendingPower': null,
+              }).catch(e => console.warn('[board] exec write failed:', e && e.message));
+            },
+          }),
+          new Promise(res => setTimeout(res, 5000)),
+        ]);
+      } catch (_) {
+        execState = null;
+        try { document.body.classList.remove('exec-active'); } catch (_) {}
+      }
+      // Backstop: if onShot's write never landed (offline blip), force it now
+      // so the game can never continue with a living victim.
+      try {
+        const checkAlive = (await get(ref(db, `games/${room}/players/${target}/alive`))).val();
+        if (checkAlive !== false) {
+          await update(ref(db, `games/${room}`), {
+            [`players/${target}/alive`]: false,
+            'meta/executionTarget': null,
+            'meta/pendingPower': null,
+          });
+        }
+      } catch (e) { console.warn('[board] exec backstop failed:', e && e.message); }
+      paintSeats();
       const win = checkExecutionWin({ executedUid: target, roles });
       if (win) return endGame(win);
       // Alternate the two execution outros so repeat games don't sound canned.
@@ -988,10 +1467,10 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'investigate_loyalty') return;
-      // Official rule: no self-investigation, living players only, never twice.
-      const targetAlive = currentPlayers[target] && currentPlayers[target].alive !== false;
+      // Official rule: no self-investigation, living non-retired players only, never twice.
+      const playersInv = await freshPlayers();
       const alreadyInvestigated = m.investigatedUids && m.investigatedUids[target] === true;
-      if (!targetAlive || target === m.presidentUid || alreadyInvestigated) {
+      if (!isSeatEligible(playersInv[target]) || target === m.presidentUid || alreadyInvestigated) {
         console.warn(`[board] rejecting invalid investigate target ${target}, waiting for a legal one`);
         await update(metaRef, { investigateTarget: null });
         return;
@@ -1007,7 +1486,7 @@ async function watchForExecutiveAction() {
       narrate('narr_33');
       narrate('narr_38');
       await update(ref(db, `games/${room}`), {
-        [`secret/executive/${currentMeta.roundId}/investigateResult`]: result,
+        [`secret/executive/${roundId}/investigateResult`]: result,
         [`meta/investigatedUids/${target}`]: true,
         'meta/investigateTarget': null,
         'meta/pendingPower': null,
@@ -1023,9 +1502,9 @@ async function watchForExecutiveAction() {
       if (!target) return;
       const m = await freshMeta();
       if (m.phase !== 'executive_action' || m.pendingPower !== 'special_election') return;
-      // Official rule: any other living player (never self, never dead).
-      const targetAlive = currentPlayers[target] && currentPlayers[target].alive !== false;
-      if (!targetAlive || target === m.presidentUid) {
+      // Official rule: any other living non-retired player (never self, never dead/retired).
+      const playersSpec = await freshPlayers();
+      if (!isSeatEligible(playersSpec[target]) || target === m.presidentUid) {
         console.warn(`[board] rejecting invalid special-election target ${target}, waiting for a legal one`);
         await update(metaRef, { specialElectionTarget: null });
         return;
@@ -1033,15 +1512,16 @@ async function watchForExecutiveAction() {
       if (!(await claim(`power-${roundId}`))) return;
       done = true;
       if (typeof unsub === 'function') unsub();
-      const enacting = currentMeta.presidentUid;
+      const enacting = m.presidentUid;
       playSound('reveal'); // special election called
       narrate('narr_39');
+      const orderSpec = m.playerOrder || [];
       const updates = {
         'meta/presidentUid': target,
         'meta/presidentUidLast': enacting,
         // The outgoing Chancellor is term-limited during the special round,
         // and clearing chancellorUid revokes their legislative read access.
-        'meta/chancellorUidLast': currentMeta.chancellorUid || null,
+        'meta/chancellorUidLast': m.chancellorUid || null,
         'meta/chancellorUid': null,
         'meta/chancellorCandidateUid': null,
         'meta/specialElectionTarget': null,
@@ -1050,24 +1530,33 @@ async function watchForExecutiveAction() {
       };
       // Remember where the normal rotation resumes. If already inside a
       // special term (nested specials), keep the outer return pointer.
-      if (!currentMeta.specialElectionReturnUid) {
-        updates['meta/specialElectionReturnUid'] = nextAliveAfter(enacting);
+      if (!m.specialElectionReturnUid) {
+        updates['meta/specialElectionReturnUid'] = await nextAliveAfter(enacting, orderSpec, playersSpec);
       }
       await update(ref(db, `games/${room}`), updates);
     });
   } else if (power === 'policy_peek') {
     // Copy top 3 tiles for the President's eyes only, then wait for their
-    // Done tap (policyPeekSeen) before advancing. The deck always holds >= 3
-    // tiles here (reshuffleIfShort runs after every session), so the peek is
-    // exactly what the next draw will deal — no merge, no lie.
+    // Done tap (policyPeekSeen) before advancing. Reshuffle first so the
+    // peek is exactly what the next draw will deal — no merge, no lie,
+    // never a short peek.
+    await reshuffleIfShort().catch(e => console.warn('[board] pre-peek reshuffle failed:', e && e.message));
     let deck = (await get(ref(db, `games/${room}/secret/deck`))).val() || [];
     if (!Array.isArray(deck)) deck = Object.values(deck);
+    deck = deck.filter(isTile);
+    if (deck.length < 3) {
+      console.warn(`[board] round ${roundId}: deck short for peek (${deck.length}), reshuffling again`);
+      await reshuffleIfShort().catch(e => console.warn('[board] pre-peek reshuffle failed:', e && e.message));
+      let retry = (await get(ref(db, `games/${room}/secret/deck`))).val() || [];
+      if (!Array.isArray(retry)) retry = Object.values(retry);
+      deck = retry.filter(isTile);
+    }
     const peek = deck.slice(0, 3);
     playSound('tile-draw');
-    await set(ref(db, `games/${room}/secret/executive/${currentMeta.roundId}/policyPeek`), peek);
+    await set(ref(db, `games/${room}/secret/executive/${roundId}/policyPeek`), peek);
     let peekDone = false;
     let unsub = null;
-    unsub = onValue(ref(db, `games/${room}/secret/executive/${currentMeta.roundId}/policyPeekSeen`), async snap => {
+    unsub = onValue(ref(db, `games/${room}/secret/executive/${roundId}/policyPeekSeen`), async snap => {
       if (peekDone) return;
       if (snap.val() !== true) return;
       const m = await freshMeta();
@@ -1109,14 +1598,21 @@ function watchForReclaimRequests() {
 async function handleReclaim(newUid, req) {
   // Single-flight across board tabs/refreshes; losers abort silently.
   if (!(await claim(`reclaim-${newUid}`))) return;
+  // Release the claim on EVERY exit (success or retryable failure): the
+  // request node stays pending with a terminal status sweep, so a held
+  // claim would block the idempotent retry path on the next watcher fire.
   try {
     const m = await freshMeta();
-    if (m.hostUid !== myUid) return;
+    if (m.hostUid !== myUid) {
+      await releaseClaim(`reclaim-${newUid}`);
+      return;
+    }
     // Idempotent path: this uid already holds a seat (a previous migration
     // landed) — approve again so the requester can observe it and move on.
     const orderNow = Array.isArray(m.playerOrder) ? m.playerOrder : Object.values(m.playerOrder || {});
     if (orderNow.includes(newUid)) {
       await approveReclaim(newUid);
+      await releaseClaim(`reclaim-${newUid}`);
       return;
     }
     const gameRoot = ref(db, `games/${room}`);
@@ -1137,6 +1633,7 @@ async function handleReclaim(newUid, req) {
     // This uid already carries a PIN (migration landed, stale request).
     if (pins[newUid] !== undefined && pins[newUid] !== null) {
       await approveReclaim(newUid);
+      await releaseClaim(`reclaim-${newUid}`);
       return;
     }
     // Match on BOTH pin and name: 4 digits alone would collide too easily.
@@ -1153,6 +1650,7 @@ async function handleReclaim(newUid, req) {
     });
     if (candidates.length !== 1) {
       await rejectReclaim(newUid);
+      await releaseClaim(`reclaim-${newUid}`);
       return;
     }
     const oldUid = candidates[0];
@@ -1232,6 +1730,7 @@ async function handleReclaim(newUid, req) {
     // so approval stays observable even if it blinks past offline.
     updates[`reclaimRequests/${newUid}/status`] = 'approved';
     await update(gameRoot, updates);
+    await releaseClaim(`reclaim-${newUid}`);
     sweepReclaim(newUid, 'approved');
   } catch (e) {
     // Transient read/write failure: release the claim so a later watcher
@@ -1279,6 +1778,7 @@ async function endGame(win) {
   else if (win.reason === 'hitler_elected_chancellor') narrate('narr_49');
   else if (win.reason === 'hitler_executed') narrate('narr_50');
   narrate('narr_51');
+  try { showWinTakeover(win.winner, win.reason); } catch (_) {}
   await update(metaRef, { winner: win.winner, winReason: win.reason, phase: 'gameover' });
 }
 
@@ -1367,8 +1867,22 @@ function render() {
   if (phase === 'gameover') {
     el('gameOverBanner').style.display = 'block';
     el('gameOverBanner').textContent = `${currentMeta.winner === 'liberal' ? 'Liberals' : 'Fascists'} win! (${currentMeta.winReason})`;
+    // Re-assert win takeover on refresh (endGame already showed it live).
+    try {
+      const winEl = el('winTakeover');
+      if (winEl && !winEl.classList.contains('show') && currentMeta.winner) {
+        showWinTakeover(currentMeta.winner, currentMeta.winReason);
+      }
+    } catch (_) {}
   } else {
     el('gameOverBanner').style.display = 'none';
+    try {
+      const winEl = el('winTakeover');
+      if (winEl && winEl.classList.contains('show')) {
+        winEl.classList.remove('show');
+        winEl.setAttribute('aria-hidden', 'true');
+      }
+    } catch (_) {}
   }
   fitStage();
 }
@@ -1457,7 +1971,14 @@ function paintTileLayer(layerId, lefts, widths, kind, filled) {
       `<div class="tile-spot" style="left:${left}%;width:${w(i)}%;top:${TILE_TOP_PCT}%;aspect-ratio:${TILE_ASPECT}"><img src="img/tile-${kind}.png" alt="${kind} policy" draggable="false" loading="lazy" /></div>`
     ).join('');
   }
-  [...layer.children].forEach((spot, i) => spot.classList.toggle('filled', i < filled));
+  // While a tile is in flight, its slot stays empty with a pulsing outline —
+  // meta already counts the policy, but the room only sees it land.
+  const pendingHere = pendingEnact && pendingEnact.kind === kind ? pendingEnact.count : -1;
+  [...layer.children].forEach((spot, i) => {
+    const isPending = (i + 1) === pendingHere && (i + 1) <= filled;
+    spot.classList.toggle('filled', i < filled && !isPending);
+    spot.classList.toggle('target-pulse', isPending);
+  });
 }
 
 function paintTrackerPips(tracker) {
@@ -1522,7 +2043,8 @@ function paintSeats() {
     (currentMeta.chancellorCandidateUid || '') + '|' +
     (currentMeta.phase || '') + '|' +
     order.map(uid => (currentPlayers[uid] && currentPlayers[uid].alive === false ? 'D' : 'A')).join('') + '|' +
-    Object.keys(votesCastMap).sort().join(',');
+    Object.keys(votesCastMap).sort().join(',') + '|' +
+    (execState ? `${execState.uid}:${execState.stage}` : '');
   const animate = seatKey !== prevSeatState;
   prevSeatState = seatKey;
 
@@ -1556,15 +2078,37 @@ function seatHtml(uid) {
   if (uid === currentMeta.presidentUid) { classes.push('president'); badge = 'PRESIDENT'; }
   else if (uid === currentMeta.chancellorUid) { classes.push('chancellor'); badge = 'CHANCELLOR'; }
   else if (currentMeta.phase === 'election' && uid === currentMeta.chancellorCandidateUid) { classes.push('candidate'); badge = 'NOMINEE'; }
-  if (p.alive === false) classes.push('dead');
+  const isDead = p.alive === false;
+  if (isDead) classes.push('dead');
   const voted = votesCastMap && Object.prototype.hasOwnProperty.call(votesCastMap, uid);
   if (voted) {
     classes.push('voted');
     if (votesRevealedFlag && votesMap && votesMap[uid] === 'nein') classes.push('voted-nein');
   }
-  return `<div class="${classes.join(' ')}">` +
+  // Execution cinematic decorations, repainted from execState so Firebase
+  // re-renders mid-cinematic can't wipe them. Dead seats keep blood + stamp
+  // + tomb permanently (only executions kill, so dead == murdered).
+  let execHtml = '';
+  const activeExec = execState && execState.uid === uid;
+  if (activeExec) classes.push('exec-target');
+  if (activeExec && execState.stage === 'lock') {
+    execHtml += `<div class="exec-crosshair" aria-hidden="true">◎</div>`;
+  }
+  if ((activeExec && (execState.stage === 'shot' || execState.stage === 'aftermath')) || (isDead && !activeExec)) {
+    const animated = activeExec && execState.stage === 'shot';
+    execHtml += `<img class="fx-blood${animated ? ' bloom' : ''}" src="img/fx-blood.png" alt="" draggable="false" />`;
+  }
+  if ((activeExec && execState.stage === 'aftermath') || (isDead && !activeExec)) {
+    const animated = activeExec && execState.stage === 'aftermath';
+    const label = activeExec && execState.isHitler ? 'HITLER EXECUTED' : 'EXECUTED';
+    execHtml += `<div class="exec-stamp${animated ? ' slam' : ''}">${label}</div>` +
+      `<img class="exec-tomb${animated ? ' rise' : ''}" src="img/icon-tombstone.png" alt="RIP" draggable="false" />`;
+  }
+  if (isDead) classes.push('exec-dead');
+  return `<div class="${classes.join(' ')}" data-uid="${escapeHtml(uid)}">` +
     (badge ? `<span class="seat-badge">${badge}</span>` : '') +
     `<img class="seat-card" src="img/back-role.png" alt="Secret role card" draggable="false" loading="lazy" />` +
+    execHtml +
     `<span class="vote-dot"></span>` +
     `<span class="seat-name">${escapeHtml(p.name || '?')}</span></div>`;
 }

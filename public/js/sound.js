@@ -12,7 +12,7 @@
 
 const SOUNDS = [
   'flip', 'tile-draw', 'vote-cast', 'election-pass', 'election-fail',
-  'chaos', 'enact-liberal', 'enact-fascist', 'execution', 'reveal',
+  'chaos', 'enact-liberal', 'enact-fascist', 'execution', 'scream', 'reveal',
   'your-turn', 'game-start', 'win-liberal', 'win-fascist',
 ];
 

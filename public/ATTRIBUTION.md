@@ -28,11 +28,21 @@ CC BY-NC-SA 4.0. No swastikas or Third-Reich insignia added; style stays with th
 official Liberal/Fascist card design.
 
 - `icon-execution.png` (skull), `icon-peek.png` (cards_seek_top),
-  `icon-investigate.png` (cards_seek), `icon-special-election.png` (token_give)
+  `icon-special-election.png` (token_give), `icon-tombstone.png`
+  (pirate-grave by Lorc)
 
 From Kenney "Board Game Icons" (https://kenney.nl/assets/board-game-icons),
-[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/),
+except `icon-tombstone.png` from game-icons.net by Lorc under
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)
+("Icons made by Lorc. Available on https://game-icons.net").
 Abstract symbols only; no historical insignia.
+
+- `fx-blood.png`: blood-red tint of two masks from Kenney "Splat Pack"
+  (https://kenney.nl/assets/splat-pack),
+  [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+  White mask shapes tinted to blood red locally with PIL; no attribution
+  required (credited here anyway).
 
 - `logo.png`, `seal-liberal.png`: original files kept as-is, preserved in
   `img/original-2026-09-17/` along with the pre-replacement PNGs.
@@ -42,7 +52,7 @@ Abstract symbols only; no historical insignia.
 ## Sound effects (`snd/`)
 
 All MP3, mono 44.1kHz ~64kbps, loudness-normalized (~-16 LUFS) with leading
-silence trimmed. Total ~264KB for 14 files — fast on phones.
+silence trimmed. Total ~282KB for 15 files — fast on phones.
 Downloaded 2026-09-17 from Pixabay under the Pixabay Content License
 (free, no attribution required, game use allowed, no standalone
 redistribution). Long originals trimmed where noted (`flip` → 0.7s,
@@ -68,6 +78,9 @@ redistribution). Long originals trimmed where noted (`flip` → 0.7s,
   https://pixabay.com/sound-effects/film-special-effects-cinematic-dark-hit-logo-463005/
 - `execution.mp3` — Distant Bang by DRAGON-STUDIO (tasteful gavel substitute) —
   https://pixabay.com/sound-effects/distant-bang-472364/
+- `scream.mp3` — Woman Screaming SFX by DRAGON-STUDIO (trimmed from 8s to
+  ~2.2s, victim-phone execution scare) —
+  https://pixabay.com/sound-effects/horror-woman-screaming-sfx-screaming-sound-effect-320169/
 - `reveal.mp3` — Appearance by Universfield (shared peek/investigate/special cue) —
   https://pixabay.com/sound-effects/film-special-effects-appearance-143023/
 - `your-turn.mp3` — Message Ping by Universfield —

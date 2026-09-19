@@ -76,6 +76,23 @@
           <!-- Narration sits in its own stage row: it used to be a fixed overlay
                at the bottom of the screen, which covered the bottom seat rail. -->
           <div id="narrBar" class="narr-bar" style="display:none"><span id="narrText"></span></div>
+          <div class="exec-flash" id="execFlash"></div>
+          <!-- Enactment cinematic + host juice overlays (view-only; board.js drives them) -->
+          <div class="enact-overlay" id="enactOverlay" aria-hidden="true">
+            <div class="enact-big-tile" id="enactBig">
+              <img id="enactImg" src="img/tile-liberal.png" alt="Enacted policy" />
+              <div class="enact-caption" id="enactCap"></div>
+              <div><span class="enact-ribbon" id="enactRibbon" style="display:none"></span></div>
+              <div class="tally-bar" id="tallyBar" style="display:none"></div>
+              <div class="tally-result" id="tallyResult"></div>
+              <div class="power-callout" id="powerCallout" style="display:none"></div>
+            </div>
+          </div>
+          <div class="win-takeover" id="winTakeover" aria-hidden="true">
+            <div class="confetti" id="winConfetti"></div>
+            <div id="winTitle"></div>
+            <small id="winSub"></small>
+          </div>
         </div>
       </div>
 

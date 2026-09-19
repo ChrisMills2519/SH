@@ -26,7 +26,7 @@ let peekPaintedFor = null; // roundId peek tiles painted (live listener owns rep
 let lastPingKey = null; // your-turn ping fires once per action (render() re-runs on every update)
 let winPlayedFor = null; // gameover stinger fires once per result
 const REDUCED_MOTION = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-const FLIP_MS = REDUCED_MOTION ? 0 : 550;
+const FLIP_MS = REDUCED_MOTION ? 0 : 900;
 
 async function main() {
   const user = await ensureSignedIn();

@@ -512,24 +512,29 @@ body.play-view {
   100% { opacity: 0; visibility: hidden; }
 }
 
-/* Dramatic role-reveal flash: flood the screen with faction color. */
-@keyframes reveal-flash-fascist {
-  0% { box-shadow: inset 0 0 120px 40px rgba(192,57,43,0.55); }
-  100% { box-shadow: inset 0 0 0 0 transparent; }
-}
-@keyframes reveal-flash-liberal {
-  0% { box-shadow: inset 0 0 120px 40px rgba(59,111,214,0.5); }
-  100% { box-shadow: inset 0 0 0 0 transparent; }
-}
+/* Dramatic role-reveal flash: flood the screen with faction color.
+   Opacity-only overlay (no box-shadow/filter) so it stays compositor-cheap
+   on phones. Trigger: body.reveal-* classes in flashFactionReveal(). */
 body.reveal-fascist::after, body.reveal-liberal::after {
   content: "";
   position: fixed;
   inset: 0;
   z-index: 60;
   pointer-events: none;
+  opacity: 0;
 }
-body.reveal-fascist::after { animation: reveal-flash-fascist 0.9s ease-out; }
-body.reveal-liberal::after { animation: reveal-flash-liberal 0.9s ease-out; }
+body.reveal-fascist::after {
+  background: rgba(192,57,43,0.45);
+  animation: reveal-flash-opacity 0.9s ease-out;
+}
+body.reveal-liberal::after {
+  background: rgba(59,111,214,0.45);
+  animation: reveal-flash-opacity 0.9s ease-out;
+}
+@keyframes reveal-flash-opacity {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
   body.reveal-fascist::after, body.reveal-liberal::after { animation: none; }
   .classified-stamp { animation: none; opacity: 0.85; }
@@ -979,7 +984,7 @@ body.reveal-liberal::after { animation: reveal-flash-liberal 0.9s ease-out; }
 }
 .flip-scene.center { width: fit-content; margin: 0 auto; }
 .flip-scene.tappable { cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-.flip-inner { position: relative; transform-style: preserve-3d; transition: transform 0.55s ease; }
+.flip-inner { position: relative; transform-style: preserve-3d; transition: transform 0.9s ease; }
 .flip-inner.flipped { transform: rotateY(180deg); }
 .flip-face { display: block; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 img.flip-face.flip-back {
@@ -1221,3 +1226,248 @@ body.in-game #hostTools p.muted { display: none; }
 #hostTools {
   background-image: var(--tex-panel-grain), var(--tex-scan);
 }
+
+/* ===========================================================================
+   Enactment cinematic + host juice (board.html).
+   View-only: overlays live INSIDE .table so they scale with --fit, and never
+   drive game logic. Reduced-motion skips flights/shakes.
+   =========================================================================== */
+.enact-overlay {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.15) 20%, rgba(0,0,0,0.78) 100%);
+  opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+}
+.enact-overlay.show { opacity: 1; pointer-events: auto; }
+.enact-big-tile { text-align: center; transform: scale(0.6) rotate(-4deg); opacity: 0; transition: transform 0.45s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s; max-width: 90%; }
+.enact-overlay.show .enact-big-tile { transform: scale(1) rotate(0deg); opacity: 1; }
+.enact-big-tile img { width: min(240px, 30cqw, 30%); min-width: 140px; height: auto; border-radius: 10px; border: 3px solid #000; background: none; box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(201,168,76,0.35); }
+#enactImg { background: none; }
+.enact-caption { margin-top: 12px; font-family: var(--font-display); font-weight: 900; font-size: 34px; letter-spacing: 0.12em; text-transform: uppercase; color: #fff; text-shadow: 2px 2px 0 #000, 0 0 24px rgba(0,0,0,0.8); line-height: 1.1; }
+.enact-caption small { display: block; font-size: 14px; letter-spacing: 0.25em; font-weight: 400; color: var(--accent); margin-top: 4px; }
+.enact-caption.liberal-cap { color: #9db9ff; }
+.enact-caption.fascist-cap { color: #ff9a8a; }
+.enact-ribbon { margin-top: 8px; display: inline-block; padding: 6px 14px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; background: #000; color: var(--accent); border: 1px dashed var(--accent); }
+.enact-flyer { position: fixed; z-index: 60; pointer-events: none; transition: transform 0.8s cubic-bezier(0.5,0,0.2,1), width 0.8s ease, opacity 0.8s; }
+.enact-flyer img { width: 100%; border-radius: 6px; border: 2px solid #000; background: none; }
+
+/* Deep zoom + spotlight: enacted board scales to readable size, rest dims. */
+body { --zoom: 2.0; }
+body.enact-focus-liberal #fascistBoard,
+body.enact-focus-fascist #liberalBoard,
+body.enact-focus-liberal .seat, body.enact-focus-fascist .seat,
+body.enact-focus-liberal #policyWell, body.enact-focus-fascist #policyWell,
+body.enact-focus-liberal #narrBar, body.enact-focus-fascist #narrBar { opacity: 0.08; filter: grayscale(0.8) brightness(0.6); transition: opacity 0.4s, filter 0.4s; }
+body.enact-focus-liberal #liberalBoard,
+body.enact-focus-fascist #fascistBoard { transition: transform 0.6s cubic-bezier(0.5,0,0.2,1), box-shadow 0.4s ease, opacity 0.3s; }
+body.enact-focus-liberal #liberalBoard { transform: scale(var(--zoom)); transform-origin: center center; z-index: 20; position: relative; box-shadow: 0 0 80px rgba(59,111,214,0.8); }
+body.enact-focus-fascist #fascistBoard { transform: scale(var(--zoom)); transform-origin: center center; z-index: 20; position: relative; box-shadow: 0 0 80px rgba(163,40,47,0.85); }
+/* Direct-to-board flight: caption docks top, NO center tile — the card
+   travels straight from the deck into the zoomed slot. */
+.enact-overlay.direct { align-items: flex-start; padding-top: 4%; }
+.enact-overlay.direct .enact-big-tile { transform: none; opacity: 1; }
+.enact-overlay.direct .enact-big-tile img { display: none; }
+.enact-overlay.direct .enact-caption { font-size: 30px; margin-top: 0; }
+.enact-flyer.direct-flyer { transition: transform 1.1s cubic-bezier(0.45,0,0.2,1), width 1.1s ease, opacity 1.1s; }
+.enact-flyer.direct-flyer img { box-shadow: 0 24px 70px rgba(0,0,0,0.85), 0 0 44px rgba(201,168,76,0.5); }
+/* Target slot: pulsing outline while the tile is in flight — stays EMPTY
+   until the tile lands, then pops. */
+.tile-spot.target-pulse { opacity: 0.45 !important; transform: none; outline: 3px dashed var(--accent); outline-offset: -3px; border-radius: 4px; animation: target-pulse 0.7s ease-in-out infinite; }
+.tile-spot.target-pulse img { visibility: hidden; }
+@keyframes target-pulse { 0%,100% { outline-color: rgba(201,168,76,0.4); } 50% { outline-color: rgba(201,168,76,1); } }
+.tile-spot.just-landed img { animation: tile-pop 0.5s cubic-bezier(0.34,1.56,0.64,1); }
+@keyframes tile-pop { 0% { transform: scale(1.35); box-shadow: 0 0 30px rgba(201,168,76,0.9); } 100% { transform: scale(1); } }
+.table.shake { animation: table-shake 0.5s ease; }
+@keyframes table-shake {
+  0%,100% { transform: translate(-50%,-50%) scale(var(--fit,1)); }
+  20% { transform: translate(calc(-50% - 8px),-50%) scale(var(--fit,1)); }
+  40% { transform: translate(calc(-50% + 8px),-50%) scale(var(--fit,1)); }
+  60% { transform: translate(calc(-50% - 5px),-50%) scale(var(--fit,1)); }
+  80% { transform: translate(calc(-50% + 5px),-50%) scale(var(--fit,1)); }
+}
+
+/* Election tally inside the overlay. */
+.tally-bar { display: flex; gap: 6px; margin: 10px auto 0; height: 34px; min-width: min(320px, 60%); }
+.tally-seg { flex: 1; border-radius: 4px; background: #333; border: 2px solid #000; transform: scaleY(0); transform-origin: bottom; transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), background 0.3s; }
+.tally-seg.ja { background: #4a9e5c; }
+.tally-seg.nein { background: var(--fascist-bright); }
+.tally-seg.on { transform: scaleY(1); }
+.tally-result { font-family: var(--font-display); font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; font-size: 22px; margin-top: 8px; min-height: 28px; }
+
+/* Power callout inside the overlay. */
+.power-callout h2 { border: none; font-size: 30px; margin: 8px 0; padding: 0; }
+.power-callout .crosshair { font-size: 64px; line-height: 1; animation: cross-pulse 0.8s ease-in-out infinite; }
+.power-callout .power-icon-big { width: 72px; height: 72px; filter: invert(90%); background: none; border: none; }
+@keyframes cross-pulse { 0%,100% { transform: scale(1); opacity: 0.7; } 50% { transform: scale(1.15); opacity: 1; } }
+
+/* Win takeover (inside stage, above enact overlay). */
+.win-takeover {
+  position: absolute; inset: 0; z-index: 50; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px; text-align: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.5s;
+  font-family: var(--font-display); font-weight: 900; font-size: 54px; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.win-takeover.show { opacity: 1; pointer-events: auto; }
+.win-takeover.liberal { background: radial-gradient(ellipse at center, rgba(59,111,214,0.92), rgba(10,20,50,0.96)); color: #fff; }
+.win-takeover.fascist { background: radial-gradient(ellipse at center, rgba(163,40,47,0.93), rgba(40,5,8,0.97)); color: #fff; }
+.win-takeover small { font-size: 16px; letter-spacing: 0.3em; font-weight: 400; }
+.win-takeover .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.win-takeover .confetti span { position: absolute; top: -16px; width: 10px; height: 16px; opacity: 0.9; animation: confetti-fall linear infinite; }
+@keyframes confetti-fall { to { transform: translateY(110vh) rotate(720deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .enact-big-tile, .enact-flyer, .tally-seg { transition: none; }
+  .table.shake, .power-callout .crosshair, .win-takeover .confetti span { animation: none; }
+  .enact-overlay, .win-takeover { transition: none; }
+  .exec-crosshair, .exec-flash.fire, .fx-blood.bloom, .exec-stamp.slam, .exec-tomb.rise { animation: none !important; }
+  body.exec-active .seat.exec-target { transform: none; }
+}
+
+/* ===========================================================================
+   Execution cinematic (victim zoom + murder moment). View-only like the
+   enactment overlay. Blood is 160% of card width (no neighbour bleed),
+   EXECUTED stamp lies across the card centre, tombstone sits offset right.
+   =========================================================================== */
+body.exec-active .seat { opacity: 0.12; filter: grayscale(0.8) brightness(0.6); }
+body.exec-active .boards, body.exec-active #policyWell, body.exec-active #narrBar { opacity: 0.12; filter: grayscale(0.8) brightness(0.6); }
+body.exec-active .seat.exec-target {
+  opacity: 1; filter: none; z-index: 30;
+  transform: scale(2.3); transform-origin: center center;
+  transition: transform 0.6s cubic-bezier(0.5,0,0.2,1), opacity 0.3s;
+}
+.seat.exec-target .seat-card { border-color: var(--fascist-bright); box-shadow: 0 0 24px rgba(192,57,43,0.9); }
+.exec-crosshair {
+  position: absolute; inset: -14px; display: flex; align-items: center; justify-content: center;
+  font-size: 110px; color: #ff3b30; text-shadow: 0 0 12px rgba(255,59,48,0.8); pointer-events: none;
+  animation: cross-converge 0.8s ease-out;
+}
+@keyframes cross-converge { 0% { transform: scale(2.2); opacity: 0; } 40% { opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+.exec-flash {
+  position: absolute; inset: 0; z-index: 45; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(255,240,220,0.95) 0%, rgba(192,57,43,0.55) 55%, transparent 80%);
+}
+.exec-flash.fire { animation: exec-flash 0.45s ease-out; }
+@keyframes exec-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+.fx-blood {
+  position: absolute; left: 50%; top: 42%; width: 160%; max-width: none;
+  transform: translate(-50%,-50%) scale(0) rotate(-18deg); opacity: 0; pointer-events: none;
+  background: none; border: none; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.6));
+}
+.fx-blood.bloom { animation: blood-bloom 0.7s cubic-bezier(0.34,1.3,0.64,1) forwards; }
+@keyframes blood-bloom { 0% { transform: translate(-50%,-50%) scale(0) rotate(-18deg); opacity: 0; } 35% { opacity: 1; } 100% { transform: translate(-50%,-50%) scale(1) rotate(8deg); opacity: 1; } }
+/* Dead seats keep their blood (no animation — the bloom already played). */
+.seat.exec-dead .fx-blood { transform: translate(-50%,-50%) rotate(8deg); opacity: 1; animation: none; }
+.exec-stamp {
+  position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%) rotate(-12deg) scale(3);
+  font-family: var(--font-display); font-weight: 900; font-size: 15px; letter-spacing: 0.14em;
+  color: var(--fascist-bright); border-top: 2px double var(--fascist-bright);
+  border-bottom: 2px double var(--fascist-bright); padding: 2px 8px; white-space: nowrap;
+  opacity: 0; pointer-events: none; background: rgba(0,0,0,0.55); z-index: 2;
+}
+.exec-stamp.slam { animation: stamp-slam 0.35s cubic-bezier(0.5,0,0.2,1.4) forwards; }
+@keyframes stamp-slam { 0% { transform: translate(-50%,-50%) rotate(-12deg) scale(3); opacity: 0; } 60% { opacity: 1; } 100% { transform: translate(-50%,-50%) rotate(-12deg) scale(1); opacity: 1; } }
+.seat.exec-dead .exec-stamp { transform: translate(-50%,-50%) rotate(-12deg); opacity: 1; animation: none; }
+.exec-tomb {
+  position: absolute; left: 72%; top: 100%; width: 34px; transform: translateX(-50%) translateY(6px);
+  opacity: 0; background: none; border: none; pointer-events: none;
+}
+.exec-tomb.rise { animation: tomb-rise 0.6s ease-out forwards; }
+@keyframes tomb-rise { to { transform: translateX(-50%) translateY(-22px); opacity: 1; } }
+.seat.exec-dead .exec-tomb { transform: translateX(-50%) translateY(-22px); opacity: 1; animation: none; }
+.seat.exec-dead img.seat-card { filter: grayscale(0.9) brightness(0.7) sepia(0.4); }
+
+/* ===========================================================================
+   Phone execution scare (play.html victim + witnesses).
+   Full-screen, transform/opacity only (compositor-cheap): red opacity flash,
+   phone shake, BANG caption, EXECUTED stamp slam. No box-shadow/filter here.
+   Trigger: body.exec-scare-* classes in play.js renderExecuted().
+   =========================================================================== */
+.exec-scare {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  background: rgba(20, 4, 6, 0.92);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  padding: 24px;
+}
+.exec-scare.show { opacity: 1; pointer-events: auto; }
+.exec-scare-flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(192, 57, 43, 0.55);
+  opacity: 0;
+  pointer-events: none;
+}
+.exec-scare.show .exec-scare-flash { animation: exec-scare-flash 0.6s ease-out; }
+@keyframes exec-scare-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+.exec-scare.shake { animation: exec-scare-shake 0.5s ease; }
+@keyframes exec-scare-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-8px, 2px); }
+  40% { transform: translate(8px, -2px); }
+  60% { transform: translate(-5px, -2px); }
+  80% { transform: translate(5px, 2px); }
+}
+.exec-bang {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 52px;
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 2px 2px 0 #000;
+  margin: 0;
+}
+.exec-scare-stamp {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 30px;
+  letter-spacing: 0.18em;
+  color: var(--fascist-bright);
+  border-top: 3px double var(--fascist-bright);
+  border-bottom: 3px double var(--fascist-bright);
+  padding: 4px 12px;
+  transform: rotate(-12deg) scale(3);
+  opacity: 0;
+  background: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+.exec-scare.show .exec-scare-stamp { animation: exec-scare-slam 0.4s cubic-bezier(0.5, 0, 0.2, 1.4) 0.55s forwards; }
+@keyframes exec-scare-slam {
+  0% { transform: rotate(-12deg) scale(3); opacity: 0; }
+  60% { opacity: 1; }
+  100% { transform: rotate(-12deg) scale(1); opacity: 1; }
+}
+.exec-scare-sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+/* Witness flash: brief red edge glow on living phones, opacity only. */
+body.exec-witness::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  background: rgba(192, 57, 43, 0.35);
+  opacity: 0;
+  animation: exec-witness-flash 0.8s ease-out;
+}
+@keyframes exec-witness-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .exec-scare, .exec-scare.show .exec-scare-flash, .exec-scare.shake,
+  .exec-scare.show .exec-scare-stamp, body.exec-witness::after { animation: none !important; transition: none !important; }
+  .exec-scare { display: none !important; }
+}
+.seat.exec-dead .seat-name { text-decoration: line-through; color: #ff9a8a; }
