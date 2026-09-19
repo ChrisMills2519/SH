@@ -93,9 +93,13 @@ export function startBoardTutorial(api) {
   let runId = 0;
   let closed = false;
 
-  // -- injected chrome -------------------------------------------------------
+  // -- injected chrome: right side rail (never covers the board — the stage
+  // shrinks beside it via body.tut-open). Text card on top, toggleable phone
+  // thumbnail below, collapse handle for narrow screens. ----------------------
   const table = api.el('table');
   if (table) table.classList.add('tut-demo');
+  try { document.body.classList.add('tut-open'); } catch (_) {}
+  try { api.fitStage(); } catch (_) {}
 
   const ui = document.createElement('div');
   ui.id = 'tutDirector';
@@ -103,19 +107,26 @@ export function startBoardTutorial(api) {
   ui.setAttribute('aria-label', 'Board tutorial walkthrough');
   ui.innerHTML = `
     <div class="tut-card">
-      <h2 id="tutDTitle"></h2>
-      <p class="muted" id="tutDBody"></p>
+      <div class="tut-card-top">
+        <h2 id="tutDTitle"></h2>
+        <button id="tutDCollapse" class="tut-collapse" type="button" aria-label="Collapse tutorial panel">–</button>
+      </div>
+      <p id="tutDBody"></p>
       <div class="tutorial-steps" id="tutDDots" aria-hidden="true"></div>
       <div class="tutorial-nav">
         <button id="tutDBack" class="secondary" type="button">← Back</button>
         <button id="tutDReplay" class="secondary" type="button">↻ Replay</button>
         <button id="tutDNext" type="button">Next →</button>
+        <button id="tutDExit" class="secondary tut-exit" type="button" aria-label="Exit tutorial">✕</button>
       </div>
-      <p class="muted tut-exit-row"><button id="tutDExit" class="linklike" type="button">Exit tutorial ✕</button> <span aria-hidden="true">·</span> <span>Esc exits · ←/→ steps</span></p>
-    </div>
-    <div class="tut-phone" id="tutPhone" aria-hidden="true" style="display:none">
-      <div class="tut-phone-label" id="tutPhoneLabel">Player phone</div>
-      <div class="tut-phone-screen" id="tutPhoneScreen"></div>
+      <p class="tut-hint" aria-hidden="true">Esc exits · ←/→ steps</p>
+      <button id="tutDPhoneBtn" class="tut-phone-toggle" type="button" aria-expanded="false" style="display:none">
+        <span class="tut-thumb" id="tutDThumb"></span><span id="tutDPhoneBtnLabel"></span>
+      </button>
+      <div class="tut-phone" id="tutPhone" style="display:none">
+        <div class="tut-phone-label" id="tutPhoneLabel">Player phone</div>
+        <div class="tut-phone-screen" id="tutPhoneScreen"></div>
+      </div>
     </div>`;
   document.body.appendChild(ui);
 
@@ -126,9 +137,27 @@ export function startBoardTutorial(api) {
   const nextBtn = ui.querySelector('#tutDNext');
   const replayBtn = ui.querySelector('#tutDReplay');
   const exitBtn = ui.querySelector('#tutDExit');
+  const collapseBtn = ui.querySelector('#tutDCollapse');
+  const phoneBtn = ui.querySelector('#tutDPhoneBtn');
+  const phoneBtnLabel = ui.querySelector('#tutDPhoneBtnLabel');
+  const phoneThumb = ui.querySelector('#tutDThumb');
   const phone = ui.querySelector('#tutPhone');
   const phoneLabel = ui.querySelector('#tutPhoneLabel');
   const phoneScreen = ui.querySelector('#tutPhoneScreen');
+
+  function setPhoneCollapse(open) {
+    phone.style.display = open ? '' : 'none';
+    phoneBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    phoneBtn.classList.toggle('open', open);
+  }
+  phoneBtn.addEventListener('click', () => {
+    setPhoneCollapse(phone.style.display === 'none');
+  });
+  collapseBtn.addEventListener('click', () => {
+    const collapsed = ui.classList.toggle('collapsed');
+    collapseBtn.textContent = collapsed ? '+' : '–';
+    collapseBtn.setAttribute('aria-label', collapsed ? 'Expand tutorial panel' : 'Collapse tutorial panel');
+  });
 
   function setFocus(selectors) {
     try {
@@ -139,32 +168,47 @@ export function startBoardTutorial(api) {
     } catch (_) {}
   }
 
+  // Phone mock: collapsed to a thumbnail button by default — tap to expand.
+  // phoneBtn label + thumb update per step; panel starts collapsed each step.
   function setPhone(kind) {
-    if (!kind) { phone.style.display = 'none'; return; }
-    phone.style.display = '';
+    if (!kind) { phoneBtn.style.display = 'none'; phone.style.display = 'none'; return; }
+    phoneBtn.style.display = '';
     const img = (src, alt, cls = '') => `<img src="${src}" alt="${alt}" draggable="false" class="${cls}" />`;
+    let label = '', thumb = '', html = '';
     if (kind === 'role') {
-      phoneLabel.textContent = "Cara's phone — secret role";
-      phoneScreen.innerHTML = `${img('img/role-liberal.png', 'Liberal role card')}<p>You are <b>Liberal</b>. Find Hitler. Stop the agenda.</p>`;
+      label = "Cara's phone — secret role";
+      thumb = 'img/role-liberal.png';
+      html = `${img('img/role-liberal.png', 'Liberal role card')}<p>You are <b>Liberal</b>. Find Hitler. Stop the agenda.</p>`;
     } else if (kind === 'ballot') {
-      phoneLabel.textContent = "Ben's phone — vote Ja!/Nein!";
-      phoneScreen.innerHTML = `<div class="tut-phone-row">${img('img/ballot-ja.png', 'Ja ballot')}${img('img/ballot-nein.png', 'Nein ballot')}</div><p>Tap a ballot. Dots pop in on seats as votes land.</p>`;
+      label = "Ben's phone — vote Ja!/Nein!";
+      thumb = 'img/ballot-ja.png';
+      html = `<div class="tut-phone-row">${img('img/ballot-ja.png', 'Ja ballot')}${img('img/ballot-nein.png', 'Nein ballot')}</div><p>Tap a ballot. Dots pop in on seats as votes land.</p>`;
     } else if (kind === 'pres-draw') {
-      phoneLabel.textContent = "President Ava — discard 1 of 3";
-      phoneScreen.innerHTML = `<div class="tut-phone-row">${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p>Tap one tile to discard it. Two pass to the Chancellor.</p>`;
+      label = "President Ava — discard 1 of 3";
+      thumb = 'img/back-tile.png';
+      html = `<div class="tut-phone-row">${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p>Tap one tile to discard it. Two pass to the Chancellor.</p>`;
     } else if (kind === 'chan-hand') {
-      phoneLabel.textContent = "Chancellor Dev — enact 1 of 2";
-      phoneScreen.innerHTML = `<div class="tut-phone-row">${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p>Tap one tile to enact it on the board.</p>`;
+      label = "Chancellor Dev — enact 1 of 2";
+      thumb = 'img/back-tile.png';
+      html = `<div class="tut-phone-row">${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p>Tap one tile to enact it on the board.</p>`;
     } else if (kind === 'peek') {
-      phoneLabel.textContent = "President Ava — policy peek";
-      phoneScreen.innerHTML = `<div class="tut-phone-row">${img('img/tile-fascist.png', 'Fascist tile')}${img('img/tile-liberal.png', 'Liberal tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p><img src="img/icon-peek.png" alt="" class="tut-icon" /> Top 3 seen in secret. Share it — or lie.</p>`;
+      label = "President Ava — policy peek";
+      thumb = 'img/tile-fascist.png';
+      html = `<div class="tut-phone-row">${img('img/tile-fascist.png', 'Fascist tile')}${img('img/tile-liberal.png', 'Liberal tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p><img src="img/icon-peek.png" alt="" class="tut-icon" /> Top 3 seen in secret. Share it — or lie.</p>`;
     } else if (kind === 'veto') {
-      phoneLabel.textContent = "Chancellor — propose veto?";
-      phoneScreen.innerHTML = `<div class="tut-phone-row">${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p>After 5 fascist policies: discard both? The President must agree.</p>`;
+      label = "Chancellor — propose veto?";
+      thumb = 'img/back-tile.png';
+      html = `<div class="tut-phone-row">${img('img/back-tile.png', 'Face-down tile')}${img('img/back-tile.png', 'Face-down tile')}</div><p>After 5 fascist policies: discard both? The President must agree.</p>`;
     } else if (kind === 'exec') {
-      phoneLabel.textContent = "President — execution (sanitized demo)";
-      phoneScreen.innerHTML = `<p><img src="img/icon-execution.png" alt="" class="tut-icon" /> Tap a seat to eliminate. Demo shows crosshair → stamp + tombstone only.</p>`;
+      label = "President — execution (sanitized demo)";
+      thumb = 'img/icon-execution.png';
+      html = `<p><img src="img/icon-execution.png" alt="" class="tut-icon" /> Tap a seat to eliminate. Demo shows crosshair → stamp + tombstone only.</p>`;
     }
+    phoneLabel.textContent = label;
+    phoneScreen.innerHTML = html;
+    phoneBtnLabel.textContent = `📱 ${label} — tap to view`;
+    phoneThumb.innerHTML = `<img src="${thumb}" alt="" draggable="false" />`;
+    setPhoneCollapse(false);
   }
 
   function paintDemo() {
@@ -325,7 +369,9 @@ export function startBoardTutorial(api) {
     try { api.cancelAnims(); api.clearWin(); api.clearExec(); api.resetCinematic(); } catch (_) {}
     try { document.querySelectorAll('.tut-focus').forEach(n => n.classList.remove('tut-focus')); } catch (_) {}
     try { table.classList.remove('tut-demo'); } catch (_) {}
+    try { document.body.classList.remove('tut-open'); } catch (_) {}
     try { ui.remove(); } catch (_) {}
+    try { api.fitStage(); } catch (_) {}
     try { api.onExit(); } catch (_) {}
   }
 
@@ -333,7 +379,6 @@ export function startBoardTutorial(api) {
   nextBtn.addEventListener('click', () => goto(idx + 1));
   replayBtn.addEventListener('click', () => goto(idx));
   exitBtn.addEventListener('click', exit);
-  ui.addEventListener('click', e => { if (e.target === ui) exit(); });
   const onKey = e => {
     if (closed) { document.removeEventListener('keydown', onKey); return; }
     if (e.key === 'Escape') { exit(); document.removeEventListener('keydown', onKey); }

@@ -1713,40 +1713,57 @@ body.exec-witness::after {
 }
 .seat.exec-dead .seat-name { text-decoration: line-through; color: #ff9a8a; }
 
-/* Animated board tutorial (sandbox ?tutorial=1): director card + mock phone
-   + spotlight focus ring on the real board. Vanilla CSS only. */
-#tutDirector { position: fixed; inset: auto 0 0 0; z-index: 80; display: flex;
-  gap: 12px; justify-content: center; align-items: flex-end; padding: 12px 16px 16px;
-  pointer-events: none; }
-#tutDirector .tut-card { pointer-events: auto; max-width: 620px; width: min(620px, 94vw);
-  background: var(--tex-panel-grain), var(--tex-scan), var(--panel);
-  border: 2px solid #000; outline: 1px solid var(--accent);
-  box-shadow: var(--shadow-hard); padding: 14px 18px; text-align: center; }
-#tutDirector .tut-card h2 { border: none; margin: 0 0 6px; padding: 0; font-size: 21px; }
-#tutDirector .tut-card p { font-size: 15px; margin: 0 0 6px; }
-#tutDirector .tutorial-steps { display: flex; gap: 6px; justify-content: center; margin: 8px 0; }
+/* Animated board tutorial (sandbox ?tutorial=1): right side rail + toggleable
+   phone thumbnail + spotlight focus ring. The rail is OUTSIDE the stage flow
+   and body.tut-open shrinks .stage-fit beside it, so fitStage() rescales the
+   real board smaller instead of the tutorial covering it. Vanilla CSS only. */
+#tutDirector { position: fixed; top: 0; right: 0; bottom: 0; width: 340px; z-index: 60;
+  display: flex; flex-direction: column; padding: 14px 14px 16px;
+  background: #1d1917; border-left: 2px solid #000;
+  box-shadow: -6px 0 18px rgba(0,0,0,0.6), -1px 0 0 var(--accent); overflow-y: auto; }
+body.tut-open .stage-fit { margin-right: 348px; }
+#tutDirector .tut-card { display: flex; flex-direction: column; gap: 10px; }
+#tutDirector .tut-card-top { display: flex; gap: 8px; align-items: flex-start; }
+#tutDirector .tut-card h2 { flex: 1; border: none; margin: 0; padding: 0;
+  font-size: 24px; line-height: 1.25; color: var(--text); }
+#tutDirector .tut-collapse { flex: none; width: 36px; min-height: 36px; font-size: 20px;
+  line-height: 1; padding: 4px 0; }
+#tutDirector #tutDBody { font-size: 19px; line-height: 1.55; font-style: normal;
+  color: #e8e4dc; text-shadow: 0 1px 3px #000; margin: 0; }
+#tutDirector .tut-hint { font-size: 12px; color: var(--muted); margin: 0; text-align: center; }
+#tutDirector .tutorial-steps { display: flex; gap: 6px; justify-content: center; margin: 2px 0; }
 #tutDirector .tutorial-steps span { width: 22px; height: 6px; border-radius: 3px; background: #444; }
 #tutDirector .tutorial-steps span.on { background: var(--accent); }
-#tutDirector .tutorial-nav { display: flex; gap: 10px; margin-top: 8px; }
-#tutDirector .tutorial-nav button { width: auto; flex: 1; }
-#tutDirector .tut-exit-row { margin-top: 8px; font-size: 13px; }
-.tut-phone { pointer-events: auto; width: 220px; flex: none;
-  background: #141210; border: 2px solid #000; outline: 1px solid var(--border);
-  border-radius: 14px; padding: 10px; text-align: center;
-  box-shadow: var(--shadow-hard); max-height: 46vh; overflow-y: auto; }
+#tutDirector .tutorial-nav { display: flex; gap: 8px; }
+#tutDirector .tutorial-nav button { width: auto; flex: 1; min-height: 44px; }
+#tutDirector .tutorial-nav .tut-exit { flex: none; min-width: 44px; }
+#tutDirector.collapsed #tutDBody, #tutDirector.collapsed .tutorial-steps,
+#tutDirector.collapsed .tutorial-nav, #tutDirector.collapsed .tut-hint,
+#tutDirector.collapsed .tut-phone-toggle, #tutDirector.collapsed .tut-phone { display: none; }
+.tut-phone-toggle { display: flex; gap: 10px; align-items: center; width: 100%;
+  text-align: left; font-size: 14px; padding: 8px 10px; }
+.tut-phone-toggle .tut-thumb img { width: 40px; height: auto; border-radius: 4px; border: 1px solid #000; }
+.tut-phone { background: #141210; border: 2px solid #000; outline: 1px solid var(--border);
+  border-radius: 14px; padding: 10px; text-align: center; }
 .tut-phone-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
 .tut-phone-screen img { max-width: 64px; height: auto; border-radius: 4px; border: 1px solid #000; }
-.tut-phone-screen p { font-size: 13px; color: var(--text); margin: 8px 0 0; }
+.tut-phone-screen p { font-size: 15px; line-height: 1.5; color: #e8e4dc; margin: 8px 0 0; }
 .tut-phone-row { display: flex; gap: 6px; justify-content: center; }
 .tut-phone-row img { width: 56px; }
 .tut-phone-screen .tut-icon { width: 34px; vertical-align: middle; }
 #table.tut-demo .tut-focus { outline: 3px solid var(--accent); outline-offset: 4px;
   border-radius: 8px; animation: tut-focus-pulse 1.6s ease-in-out infinite; }
 @keyframes tut-focus-pulse { 0%, 100% { outline-color: var(--accent); } 50% { outline-color: #fff2c0; } }
-@media (max-width: 760px) {
-  #tutDirector { flex-direction: column; align-items: center; }
-  .tut-phone { width: min(320px, 92vw); max-height: 30vh; }
+/* Narrow screens: rail becomes a collapsible bottom sheet so the tall-stage
+   board stays visible; stage gets bottom room instead of right room. */
+@media (max-width: 900px) {
+  #tutDirector { top: auto; left: 0; right: 0; bottom: 0; width: auto;
+    max-height: 44vh; border-left: none; border-top: 2px solid #000;
+    box-shadow: 0 -6px 18px rgba(0,0,0,0.6); }
+  body.tut-open .stage-fit { margin-right: 0; margin-bottom: 190px; }
+  #tutDirector.collapsed { max-height: none; }
+  #tutDirector.collapsed .tut-card-top { margin: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   #table.tut-demo .tut-focus { animation: none !important; }
