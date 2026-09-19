@@ -527,6 +527,50 @@ img { background: var(--panel); }
 .qr-box { text-align: center; margin: 20px 0; }
 .qr-box img { background: #fff; padding: 10px; border-radius: 8px; }
 
+/* Lobby punch: side-by-side QR + progress/seats on wide screens. */
+.lobby-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+@media (max-width: 800px) { .lobby-grid { grid-template-columns: 1fr; } }
+.room-code-big { font-family: var(--font-display); font-weight: 900; font-size: 28px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); margin: 12px 0 4px; }
+.room-code-big span { letter-spacing: 0.35em; }
+.lobby-progress-track { height: 12px; border: 2px solid #000; background: rgba(0,0,0,0.4); border-radius: 6px; overflow: hidden; margin: 8px 0 12px; }
+.lobby-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-dark), var(--accent)); transition: width 0.3s ease; }
+.lobby-seats { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; min-height: 36px; }
+.lobby-seat { padding: 6px 12px; border-radius: 14px; background: var(--bg-paper); border: 1px solid var(--border); font-size: 15px; }
+.lobby-names { overflow-wrap: anywhere; }
+
+/* Couch readability: bigger office rings + badges, tracker pill, larger captions. */
+.seat.president img.seat-card { border: 3px solid var(--accent); box-shadow: 0 0 18px rgba(201,168,76,0.95), 0 0 4px #000; }
+.seat.chancellor img.seat-card { border: 3px solid #6fd68b; box-shadow: 0 0 18px rgba(111,214,139,0.95), 0 0 4px #000; }
+.seat.president .seat-badge, .seat.chancellor .seat-badge { font-size: 11px; padding: 3px 10px; }
+.seat.candidate img.seat-card { border-width: 3px; }
+.tracker-pill { display: inline-block; margin-top: 6px; padding: 4px 14px; border-radius: 12px; background: rgba(0,0,0,0.65); border: 1px solid var(--accent); font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: #ffd75e; line-height: 1.2; }
+.tracker-pill.danger { border-color: var(--fascist-bright); color: #ff9a8a; animation: pip-pulse-danger 0.8s ease-in-out infinite; }
+
+/* Phone sticky game-state header. */
+.game-state-bar { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; background: rgba(0,0,0,0.72); border-bottom: 1px dashed var(--border); padding: 8px 4px; margin-bottom: 10px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text); }
+.game-state-bar .gsb-alert { color: #ff9a8a; }
+
+/* Tutorial overlay (board host chrome): fixed to the viewport like the win
+   takeover, NOT inside the stage — #gamePanel (and the #table in it) is
+   hidden in the lobby, so a stage-child overlay would be invisible. */
+.tutorial-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.72); padding: 16px; }
+.tutorial-card { max-width: 560px; width: 92%; background: var(--tex-panel-grain), var(--tex-scan), var(--panel); border: 2px solid #000; outline: 1px solid var(--accent); box-shadow: var(--shadow-hard); padding: 22px 24px; text-align: center; }
+.tutorial-card h2 { border: none; margin: 0 0 8px; padding: 0; font-size: 24px; }
+.tutorial-steps { display: flex; gap: 6px; justify-content: center; margin: 10px 0; }
+.tutorial-steps span { width: 28px; height: 6px; border-radius: 3px; background: #444; }
+.tutorial-steps span.on { background: var(--accent); }
+.tutorial-nav { display: flex; gap: 10px; margin-top: 14px; }
+.tutorial-nav button { width: auto; flex: 1; }
+
+/* Win role reveal grid + rematch. */
+.win-roles { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 12px 0; max-width: 560px; }
+.win-role { padding: 4px 12px; border-radius: 12px; font-family: var(--font-display); font-size: 15px; letter-spacing: 0.06em; border: 2px solid #000; }
+.win-role.liberal { background: rgba(59,111,214,0.85); }
+.win-role.fascist { background: rgba(163,40,47,0.85); }
+.win-role.hitler { background: #4a0a10; border-color: var(--accent); }
+.win-stats { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+#rematchBtn { width: auto; margin-top: 12px; min-width: 220px; }
+
 .vote-buttons { display: flex; gap: 12px; }
 .vote-buttons button.ja { background: #4a9e5c; color: #10241a; }
 .vote-buttons button.nein { background: var(--fascist-bright); color: #fff; }
@@ -1432,7 +1476,7 @@ body.in-game #hostTools p.muted { display: none; }
 .enact-overlay.show .enact-big-tile { transform: scale(1) rotate(0deg); opacity: 1; }
 .enact-big-tile img { width: min(240px, 30cqw, 30%); min-width: 140px; height: auto; border-radius: 10px; border: 3px solid #000; background: none; box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(201,168,76,0.35); }
 #enactImg { background: none; }
-.enact-caption { margin-top: 12px; font-family: var(--font-display); font-weight: 900; font-size: 34px; letter-spacing: 0.12em; text-transform: uppercase; color: #fff; text-shadow: 2px 2px 0 #000, 0 0 24px rgba(0,0,0,0.8); line-height: 1.1; }
+.enact-caption { margin-top: 12px; font-family: var(--font-display); font-weight: 900; font-size: 44px; letter-spacing: 0.12em; text-transform: uppercase; color: #fff; text-shadow: 2px 2px 0 #000, 0 0 24px rgba(0,0,0,0.8); line-height: 1.1; }
 .enact-caption small { display: block; font-size: 14px; letter-spacing: 0.25em; font-weight: 400; color: var(--accent); margin-top: 4px; }
 .enact-caption.liberal-cap { color: #9db9ff; }
 .enact-caption.fascist-cap { color: #ff9a8a; }
@@ -1502,7 +1546,7 @@ body.enact-focus-fascist #fascistBoard { transform: translate(var(--zoom-tx, 0px
   position: absolute; inset: 0; z-index: 50; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 10px; text-align: center;
   opacity: 0; pointer-events: none; transition: opacity 0.5s;
-  font-family: var(--font-display); font-weight: 900; font-size: 54px; letter-spacing: 0.1em; text-transform: uppercase;
+   font-family: var(--font-display); font-weight: 900; font-size: 72px; letter-spacing: 0.1em; text-transform: uppercase;
 }
 .win-takeover.show { opacity: 1; pointer-events: auto; }
 .win-takeover.liberal { background: radial-gradient(ellipse at center, rgba(59,111,214,0.92), rgba(10,20,50,0.96)); color: #fff; }

@@ -5,15 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#1a1816" />
 <title>Secret Hitler — Play</title>
-<link rel="icon" href="data:," />
+<link rel="icon" href="img/seal-liberal.png" />
+<link rel="apple-touch-icon" href="img/seal-liberal.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=Special+Elite&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,700;6..96,900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css" />
 </head>
 <body class="play-view">
   <div class="board-wrap" style="max-width:480px">
-    <p class="muted" id="status"></p>
+    <p class="muted" id="status" aria-live="polite"></p>
+    <div id="gameStateBar" class="game-state-bar" style="display:none" aria-label="Game state"></div>
     <div class="play-topbar">
       <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
       <!-- My role: re-checkable on every phase, not just the idle screen.

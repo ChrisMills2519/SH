@@ -398,6 +398,7 @@ function watchReclaimOutcome(name, pin, statusEl) {
 function render() {
   const phase = currentMeta.phase;
   el('status').textContent = phase ? `Phase: ${phase}` : 'Waiting for host to start...';
+  paintGameStateBar();
 
   if (phase === 'gameover') {
     dropLiveSubs();
@@ -549,6 +550,22 @@ function watchExecutionWitness() {
   }
 }
 
+// Sticky compact game state so phones don't have to squint at the TV:
+// tracks, tracker, office holders, living count. Pure function of the
+// already-subscribed players/meta caches — no new Firebase reads.
+function paintGameStateBar() {
+  const bar = el('gameStateBar');
+  if (!bar) return;
+  const phase = currentMeta.phase;
+  if (!phase || phase === 'gameover' || !myRole) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  const order = currentMeta.playerOrder || [];
+  const alive = order.filter(uid => currentPlayers[uid] && currentPlayers[uid].alive !== false).length;
+  const tracker = currentMeta.electionTracker || 0;
+  const alert = tracker >= 2 ? `<span class="gsb-alert">Tracker ${tracker}/3 — chaos next</span>` : `<span>Tracker ${tracker}/3</span>`;
+  bar.style.display = 'flex';
+  bar.innerHTML = `<span>L${currentMeta.liberalTrack || 0} · F${currentMeta.fascistTrack || 0}</span>${alert}<span>P:${escapeHtml(nameOf(currentMeta.presidentUid))}</span><span>Alive ${alive}/${order.length || '?'}</span>`;
+}
+
 function renderRoleGate() {
   const roleLabel = myRole === 'hitler' ? 'Hitler' : myRole[0].toUpperCase() + myRole.slice(1);
   const roleImg = myRole === 'hitler' ? 'role-hitler' : `role-${myRole}`;
@@ -696,11 +713,11 @@ function renderVoting() {
         <button class="ballot ja" id="jaBtn"><div class="flip-scene"><div class="flip-inner" id="jaFlip">
           <img src="img/ballot-ja.png" alt="Ja!" class="flip-face" />
           <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
-        </div></div></button>
+        </div></div><span class="muted" aria-hidden="true">JA ✓</span></button>
         <button class="ballot nein" id="neinBtn"><div class="flip-scene"><div class="flip-inner" id="neinFlip">
           <img src="img/ballot-nein.png" alt="Nein!" class="flip-face" />
           <img src="img/back-ballot.png" alt="" class="flip-face flip-back" />
-        </div></div></button>
+        </div></div><span class="muted" aria-hidden="true">NEIN ✕</span></button>
       </div>
     </div>
   `;

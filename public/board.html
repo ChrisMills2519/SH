@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" content="#1a1816" />
 <title>Secret Hitler — Board</title>
-<link rel="icon" href="data:," />
+<link rel="icon" href="img/seal-liberal.png" />
+<link rel="apple-touch-icon" href="img/seal-liberal.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=Special+Elite&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,700;6..96,900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Playfair+Display:wght@400;700;900&family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -20,6 +21,7 @@
       <div class="board-header-controls">
         <button id="soundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
         <button id="narratorBtn" class="sound-toggle" type="button">🎙️ Narrator on</button>
+        <button id="tutorialBtn" class="sound-toggle" type="button">🎓 Tutorial</button>
         <button id="fullscreenBtn" class="sound-toggle" type="button">⛶ Fullscreen</button>
       </div>
     </div>
@@ -28,16 +30,31 @@
     <div id="gameOverBanner" class="role-banner" style="display:none"></div>
 
     <section id="lobbyPanel">
+      <div class="lobby-grid">
       <div class="qr-box">
         <div id="qrBox" aria-label="QR code to join"></div>
         <p class="muted" id="joinUrl"></p>
+        <p class="room-code-big" aria-label="Room code">Room <span id="roomCodeBig">????</span> <button id="copyLinkBtn" class="sound-toggle" type="button">⧉ Copy join link</button></p>
         <p class="muted">Phones on wifi? If the QR won't load on phones, type this device's network address here and re-scan:
           <input id="phoneHost" inputmode="url" autocomplete="off" spellcheck="false" placeholder="e.g. 192.168.0.77:8080" />
         </p>
       </div>
-      <p><strong id="playerCount">0</strong> players joined: <span id="playerNames"></span></p>
-      <p class="muted">Need 5–10 players.</p>
-      <button id="startBtn" disabled>Start Game</button>
+      <div class="lobby-side">
+        <div class="lobby-progress" role="status" aria-live="polite">
+          <div class="lobby-progress-label"><strong id="playerCount">0</strong>/10 seated <span class="muted" id="lobbyNeed">— need 5 to start</span></div>
+          <div class="lobby-progress-track"><div class="lobby-progress-fill" id="lobbyFill" style="width:0%"></div></div>
+        </div>
+        <div class="lobby-seats" id="lobbySeats" aria-label="Seated players"></div>
+        <p class="muted lobby-names">In the room: <span id="playerNames"></span></p>
+        <p class="muted">Need 5–10 players. Fascist board + powers scale with headcount (5–6 / 7–8 / 9–10).</p>
+        <button id="startBtn" disabled>Start Game</button>
+        <p class="muted" id="copyStatus" aria-live="polite"></p>
+        <details class="host-details">
+          <summary>New here? How a round works (30 sec)</summary>
+          <p class="muted">President nominates a Chancellor → everyone votes Ja!/Nein! on their phone → elected government passes one policy in secret → Fascist policies may unlock a presidential power (peek, investigate, special election, execution). Liberals win at 5 blue, Fascists at 6 red — or if Hitler is elected Chancellor after 3 red.</p>
+        </details>
+      </div>
+      </div>
     </section>
 
     <section id="gamePanel" style="display:none">
@@ -69,6 +86,7 @@
                   <div class="pile-badge pile-discard-badge" id="discardBadge" title="Tiles in discard pile">0</div>
                 </div>
               </div>
+              <div style="text-align:center"><span class="tracker-pill" id="trackerPill">Tracker 0/3</span></div>
             </div>
             <div class="seat-col seat-right" id="seatRight" aria-label="Right seats"></div>
           </div>
@@ -92,6 +110,9 @@
             <div class="confetti" id="winConfetti"></div>
             <div id="winTitle"></div>
             <small id="winSub"></small>
+            <div class="win-roles" id="winRoles"></div>
+            <div class="win-stats" id="winStats"></div>
+            <button id="rematchBtn" type="button" style="display:none">↻ Play again (same room)</button>
           </div>
         </div>
       </div>

@@ -90,6 +90,19 @@ async function main() {
     refreshJoin();
   });
   el('roomCode').textContent = room;
+  const roomBig = el('roomCodeBig');
+  if (roomBig) roomBig.textContent = room;
+  const copyBtn = el('copyLinkBtn');
+  if (copyBtn) copyBtn.addEventListener('click', async () => {
+    const url = buildJoinUrl();
+    const st = el('copyStatus');
+    try {
+      await navigator.clipboard.writeText(url);
+      if (st) st.textContent = 'Join link copied — paste it to phones.';
+    } catch (_) {
+      if (st) st.textContent = url;
+    }
+  });
 
   onValue(ref(db, `games/${room}/players`), snap => {
     currentPlayers = snap.val() || {};
@@ -127,6 +140,14 @@ async function main() {
   watchForReclaimRequests();
 
   el('startBtn').addEventListener('click', startGame);
+  const rematchBtn = el('rematchBtn');
+  if (rematchBtn) rematchBtn.addEventListener('click', () => {
+    startGame().catch(e => console.warn('[board] rematch failed:', e && e.message));
+  });
+  const tutorialBtn = el('tutorialBtn');
+  if (tutorialBtn) tutorialBtn.addEventListener('click', () => {
+    try { openTutorial(); } catch (e) { console.warn('[board] tutorial failed:', e && e.message); }
+  });
 
   // Stage fitting. Re-run whenever the space the stage has to live in changes:
   // a window resize, a fullscreen toggle, a projector resolution switch, the
@@ -358,6 +379,13 @@ function narrateEnactment(tile, newVal) {
 const CINEMATIC_MS = 2300;
 const TALLY_MS = 1900;
 const CALLOUT_MS = 1800;
+// Enactment timeline: zoom settles at 650ms, the deck→slot flight takes
+// 1150ms (landing at 1800ms), then the placed board holds centred for a
+// ~2s beat so the room can read what comes next before the scene settles.
+const ENACT_FLIGHT_START_MS = 650;
+const ENACT_FLIGHT_MS = 1150;
+const ENACT_READ_HOLD_MS = 2000;
+const ENACT_TOTAL_MS = ENACT_FLIGHT_START_MS + ENACT_FLIGHT_MS + ENACT_READ_HOLD_MS; // 3800
 
 function prefersReducedMotion() {
   try {
@@ -378,6 +406,9 @@ function cinematicEls() {
     win: el('winTakeover'),
     winTitle: el('winTitle'),
     winSub: el('winSub'),
+    winRoles: el('winRoles'),
+    winStats: el('winStats'),
+    rematchBtn: el('rematchBtn'),
     confetti: el('winConfetti'),
     table: el('table'),
     execFlash: el('execFlash'),
@@ -400,6 +431,11 @@ function resetCinematic() {
   try {
     document.body.classList.remove('enact-focus-liberal', 'enact-focus-fascist');
     if (win) win.classList.remove('show');
+    // Clear any per-enactment centering translate so the next zoom recomputes.
+    for (const id of ['liberalBoard', 'fascistBoard']) {
+      const b = el(id);
+      if (b) { b.style.removeProperty('--zoom-tx'); b.style.removeProperty('--zoom-ty'); }
+    }
   } catch (_) {}
   const table = el('table');
   if (table) table.classList.remove('shake');
@@ -436,7 +472,7 @@ function flyDeckToSlot(kind, count, onLanded) {
       flyer.style.width = `${to.width}px`;
       flyer.style.opacity = '0.98';
     }));
-    setTimeout(() => { flyer.remove(); if (onLanded) onLanded(); }, 1150);
+    setTimeout(() => { flyer.remove(); if (onLanded) onLanded(); }, ENACT_FLIGHT_MS);
   } catch (_) { if (onLanded) onLanded(); }
 }
 
@@ -447,9 +483,30 @@ const POWER_LABELS = {
   execution: 'Execution unlocked',
 };
 
-// Blocking enactment cinematic, direct-to-board (~2.6s; fast reduced-motion).
+// Center the zoomed board on the stage: translate the active board (in its own
+// local units) so its centre lands on the stage centre, then CSS scales it
+// about that centre. Must run BEFORE the zoom class is added (measures the
+// unzoomed box); the local translate is screen delta ÷ stage fit, because the
+// stage's own scale(var(--fit)) sits between local units and screen pixels.
+function centerZoomOnBoard(boardEl) {
+  try {
+    const stage = el('table');
+    if (!stage || !boardEl) return;
+    const stageRect = stage.getBoundingClientRect();
+    const fit = stageRect.width / (stage.offsetWidth || 1) || 1;
+    const b = boardEl.getBoundingClientRect();
+    const dx = (stageRect.left + stageRect.width / 2) - (b.left + b.width / 2);
+    const dy = (stageRect.top + stageRect.height / 2) - (b.top + b.height / 2);
+    boardEl.style.setProperty('--zoom-tx', `${(dx / fit).toFixed(1)}px`);
+    boardEl.style.setProperty('--zoom-ty', `${(dy / fit).toFixed(1)}px`);
+  } catch (_) {}
+}
+
+// Blocking enactment cinematic, direct-to-board (~3.8s; fast reduced-motion).
 // No center hold: caption docks top, board zooms, tile flies deck → slot and
 // the slot fills exactly ON LANDING via pendingEnact (see paintTileLayer).
+// After landing the placed board holds centred for a ~2s beat naming what
+// comes next, so the room can read it before the scene settles.
 function playEnactCinematic(tile, count, { chaos = false, powerLabel = null } = {}) {
   const { overlay, cap, ribbon, tallyBar, tallyResult, powerBox, table } = cinematicEls();
   if (!overlay || !cap) return Promise.resolve();
@@ -468,6 +525,8 @@ function playEnactCinematic(tile, count, { chaos = false, powerLabel = null } = 
   if (tallyBar) tallyBar.style.display = 'none';
   if (tallyResult) tallyResult.textContent = '';
   if (powerBox) powerBox.style.display = 'none';
+  const boardEl = tile === 'liberal' ? el('liberalBoard') : el('fascistBoard');
+  centerZoomOnBoard(boardEl); // measure unzoomed, so translate is exact…
   try { document.body.classList.add(isLib ? 'enact-focus-liberal' : 'enact-focus-fascist'); } catch (_) {}
   if (chaos && table) {
     table.classList.remove('shake');
@@ -480,9 +539,10 @@ function playEnactCinematic(tile, count, { chaos = false, powerLabel = null } = 
   if (prefersReducedMotion()) {
     return new Promise(res => setTimeout(() => { pendingEnact = null; resetCinematic(); paintBoardOverlays(); res(); }, 200));
   }
-  const boardEl = tile === 'liberal' ? el('liberalBoard') : el('fascistBoard');
-  // Launch the deck→slot flight on the next frames so the zoom applies first.
-  requestAnimationFrame(() => requestAnimationFrame(() => {
+  // …then wait out the 0.6s zoom transition before measuring the landing
+  // slot, so the deck→slot flight targets the-centred- board, not mid-zoom.
+  // Timeline: zoom 0–600ms, flight 650–1800ms, read-hold to ~3800ms, settle.
+  setTimeout(() => {
     flyDeckToSlot(tile, count, () => {
       pendingEnact = null;
       paintBoardOverlays();
@@ -496,14 +556,20 @@ function playEnactCinematic(tile, count, { chaos = false, powerLabel = null } = 
         boardEl.classList.add(tile === 'liberal' ? 'just-enacted-liberal' : 'just-enacted-fascist');
         setTimeout(() => boardEl.classList.remove('just-enacted-liberal', 'just-enacted-fascist'), 700);
       }
-      cap.innerHTML = `${capTitle} ${count}<small>Placed</small>`;
+      // Name what's next while the placed board holds: a power means the
+      // President acts; otherwise the presidency passes to the next seat.
+      const nextStep = powerLabel ? `${powerLabel} — President acts next`
+        : chaos ? 'Chaos — presidency passes'
+        : 'Placed — presidency passes';
+      cap.innerHTML = `${capTitle} ${count}<small>${nextStep}</small>`;
     });
-  }));
-  // Hold the zoom briefly after landing so the placement reads, then settle.
+  }, ENACT_FLIGHT_START_MS);
+  // Hold the zoomed, centred board through the read beat so the placement
+  // and the next step register, then settle.
   return new Promise(res => {
     const done = () => { pendingEnact = null; resetCinematic(); paintBoardOverlays(); res(); };
-    setTimeout(done, CINEMATIC_MS + 300);
-    setTimeout(done, CINEMATIC_MS + 1800); // backstop
+    setTimeout(done, ENACT_TOTAL_MS);
+    setTimeout(done, ENACT_TOTAL_MS + 1800); // backstop
   });
 }
 
@@ -672,16 +738,60 @@ function playExecutionCinematic(targetUid, { isHitler = false, victimName = '?',
   })();
 }
 
+function paintWinRoles(box) {
+  // Cache-only first paint: roles may not be readable yet on a refresh.
+  // The async refresh in showWinTakeover fills real names right after.
+  const order = currentMeta.playerOrder || [];
+  if (!order.length) { box.innerHTML = ''; return; }
+  box.innerHTML = order.map(uid => {
+    const name = (currentPlayers[uid] && currentPlayers[uid].name) || '?';
+    return `<span class="win-role liberal">${escapeHtml(name)}</span>`;
+  }).join('');
+}
+
 // Persistent win takeover (stays until next game; render() re-asserts on refresh).
+// Reveals every seat's role (the social-deduction payoff), the final track
+// score, and a same-room rematch button for the host.
 function showWinTakeover(winner, reason) {
   try {
-    const { win, winTitle, winSub, confetti } = cinematicEls();
+    const { win, winTitle, winSub, winRoles, winStats, rematchBtn, confetti } = cinematicEls();
     if (!win) return;
     resetCinematic();
     win.classList.remove('liberal', 'fascist');
     win.classList.add(winner === 'liberal' ? 'liberal' : 'fascist');
     if (winTitle) winTitle.textContent = winner === 'liberal' ? 'Liberals win!' : 'Fascists win!';
     if (winSub) winSub.textContent = WIN_SUBS[reason] || String(reason || '');
+    if (winStats) {
+      const rounds = currentMeta.roundId || 0;
+      winStats.textContent = `Final: ${(currentMeta.liberalTrack || 0)} liberal · ${(currentMeta.fascistTrack || 0)} fascist · ${rounds} elections`;
+    }
+    if (winRoles) {
+      // Synchronous paint from the render cache; async refresh fills names
+      // once the reads land (refresh-safe: render() re-calls this).
+      paintWinRoles(winRoles);
+      Promise.all([
+        get(ref(db, `games/${room}/secret/roles`)).catch(() => null),
+        get(ref(db, `games/${room}/players`)).catch(() => null),
+      ]).then(([rSnap, pSnap]) => {
+        try {
+          const roles = (rSnap && rSnap.val()) || {};
+          const players = (pSnap && pSnap.val()) || currentPlayers;
+          if (!Object.keys(roles).length) return;
+          const order = currentMeta.playerOrder || Object.keys(roles);
+          winRoles.innerHTML = order.map(uid => {
+            const role = roles[uid] || '?';
+            const name = (players[uid] && players[uid].name) || '?';
+            const cls = role === 'hitler' ? 'hitler' : role === 'fascist' ? 'fascist' : 'liberal';
+            const label = role === 'hitler' ? 'Hitler' : role[0].toUpperCase() + role.slice(1);
+            return `<span class="win-role ${cls}">${escapeHtml(name)} · ${label}</span>`;
+          }).join('');
+        } catch (_) {}
+      });
+    }
+    if (rematchBtn) {
+      const isHost = !currentMeta.hostUid || currentMeta.hostUid === myUid;
+      rematchBtn.style.display = isHost ? 'inline-block' : 'none';
+    }
     if (confetti) {
       confetti.innerHTML = '';
       const colors = winner === 'liberal'
@@ -699,6 +809,107 @@ function showWinTakeover(winner, reason) {
     win.classList.add('show');
     win.setAttribute('aria-hidden', 'false');
   } catch (_) {}
+}
+
+// ---------------------------------------------------------------------------
+// Optional tutorial overlay (lobby/gameover only — never during a live game,
+// so demo sounds/shakes can't stomp real cinematics). Four steps covering
+// the board layout plus the animation/sound vocabulary (tally, enactment,
+// power callout, chaos shake). View-only: no game state is written.
+// ---------------------------------------------------------------------------
+const TUTORIAL_STEPS = [
+  {
+    title: 'The table',
+    body: 'Liberals build blue (left), Fascists build red (right). Seats ring the table — gold ring = President, green = Chancellor. The fanned tiles between the boards are the draw deck; the number badge is tiles left.',
+    sound: null,
+  },
+  {
+    title: 'Election: nominate → vote',
+    body: 'President nominates one Chancellor, then every phone votes Ja! / Nein!. Watch the tally bars fill. Majority wins — three failed votes in a row cause chaos.',
+    sound: 'vote-cast',
+  },
+  {
+    title: 'Legislation in secret',
+    body: 'Elected governments pass policies phone-to-phone: President discards one of three, Chancellor enacts one of two. The tile then flies deck → board with a zoom. Listen for the brass fanfare (liberal) vs the dark hit (fascist).',
+    sound: 'tile-draw',
+  },
+  {
+    title: 'Powers, veto & chaos',
+    body: 'Fascist policies unlock presidential powers: peek, investigate, special election, execution. At 5 red the Chancellor may propose veto. Three failed elections = chaos: the top tile auto-enacts and the table shakes.',
+    sound: 'chaos',
+  },
+];
+
+let tutorialIdx = 0;
+
+function openTutorial() {
+  const phase = currentMeta.phase;
+  closeTutorial();
+  if (phase && phase !== 'lobby' && phase !== 'gameover') {
+    alert('Tutorial runs before the game starts (lobby) so it can\u2019t cover a live round.');
+    return;
+  }
+  // Appended to <body>, not #table: the table lives inside #gamePanel,
+  // which render() hides in the lobby — the overlay would be invisible.
+  const overlay = document.createElement('div');
+  overlay.className = 'tutorial-overlay';
+  overlay.id = 'tutorialOverlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-label', 'Board tutorial');
+  overlay.innerHTML = `
+    <div class="tutorial-card">
+      <h2 id="tutTitle"></h2>
+      <p class="muted" id="tutBody" style="font-size:16px"></p>
+      <div class="tutorial-steps" id="tutDots" aria-hidden="true"></div>
+      <div class="tutorial-nav">
+        <button id="tutBack" class="secondary" type="button">← Back</button>
+        <button id="tutNext" type="button">Next →</button>
+      </div>
+      <p class="muted" style="margin-top:10px"><button id="tutClose" class="linklike" type="button">Skip tutorial ✕</button> · Esc closes</p>
+    </div>`;
+  document.body.appendChild(overlay);
+  el('tutBack').addEventListener('click', () => showTutorialStep(tutorialIdx - 1));
+  el('tutNext').addEventListener('click', () => showTutorialStep(tutorialIdx + 1));
+  el('tutClose').addEventListener('click', closeTutorial);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeTutorial(); });
+  const onKey = e => {
+    if (e.key === 'Escape') { closeTutorial(); document.removeEventListener('keydown', onKey); }
+    if (e.key === 'ArrowRight') showTutorialStep(tutorialIdx + 1);
+    if (e.key === 'ArrowLeft') showTutorialStep(tutorialIdx - 1);
+  };
+  document.addEventListener('keydown', onKey);
+  tutorialIdx = 0;
+  showTutorialStep(0);
+}
+
+function showTutorialStep(i) {
+  if (i >= TUTORIAL_STEPS.length) { closeTutorial(); return; }
+  if (i < 0) i = 0;
+  tutorialIdx = i;
+  const step = TUTORIAL_STEPS[i];
+  const title = el('tutTitle'), body = el('tutBody'), dots = el('tutDots'), next = el('tutNext'), back = el('tutBack');
+  if (!title || !el('tutorialOverlay')) return;
+  title.textContent = `Step ${i + 1}/4 — ${step.title}`;
+  body.textContent = step.body;
+  dots.innerHTML = TUTORIAL_STEPS.map((_, k) => `<span class="${k === i ? 'on' : ''}"></span>`).join('');
+  if (next) next.textContent = i === TUTORIAL_STEPS.length - 1 ? 'Done ✓' : 'Next →';
+  if (back) back.disabled = i === 0;
+  if (step.sound) { try { playSound(step.sound); } catch (_) {} }
+  // Tiny stage-safe demo on the last step: shake the table once like chaos.
+  if (i === 3) {
+    const table = el('table');
+    if (table && !prefersReducedMotion()) {
+      table.classList.remove('shake');
+      void table.offsetWidth;
+      table.classList.add('shake');
+      setTimeout(() => table.classList.remove('shake'), 550);
+    }
+  }
+}
+
+function closeTutorial() {
+  const o = el('tutorialOverlay');
+  if (o) o.remove();
 }
 
 // The Chancellor's veto request lives under secret/legislative, not meta, so it
@@ -1018,7 +1229,7 @@ async function runChaos(fresh) {
   try {
     await Promise.race([
       playEnactCinematic(tile, newVal, { chaos: true }),
-      new Promise(res => setTimeout(res, CINEMATIC_MS + 1200)),
+      new Promise(res => setTimeout(res, ENACT_TOTAL_MS + 1200)),
     ]);
   } catch (_) { resetCinematic(); }
   const win = checkWin({ liberalTrack: trackField === 'liberalTrack' ? newVal : base.liberalTrack, fascistTrack: fascistNow });
@@ -1288,7 +1499,7 @@ function watchForChancellorEnact() {
         : upcomingPower ? POWER_LABELS[upcomingPower] : null;
       await Promise.race([
         playEnactCinematic(tile, newVal, { powerLabel }),
-        new Promise(res => setTimeout(res, CINEMATIC_MS + 1200)),
+        new Promise(res => setTimeout(res, ENACT_TOTAL_MS + 1200)),
       ]);
     } catch (_) { resetCinematic(); }
 
@@ -1814,9 +2025,16 @@ function render() {
   el('gamePanel').style.display = phase && phase !== 'lobby' ? '' : 'none';
 
   if (phase === 'lobby') {
-    const names = Object.values(currentPlayers).filter(p => p && p.retired !== true).map(p => p.name);
+    const live = Object.values(currentPlayers).filter(p => p && p.retired !== true);
+    const names = live.map(p => p.name);
     el('playerCount').textContent = names.length;
-    el('playerNames').textContent = names.join(', ');
+    el('playerNames').textContent = names.join(', ') || '—';
+    const need = el('lobbyNeed');
+    if (need) need.textContent = names.length < 5 ? `— need ${5 - names.length} more` : names.length > 10 ? '— too many (max 10)' : '— ready to start';
+    const fill = el('lobbyFill');
+    if (fill) fill.style.width = `${Math.min(100, (names.length / 10) * 100)}%`;
+    const seats = el('lobbySeats');
+    if (seats) seats.innerHTML = names.map(n => `<span class="lobby-seat">${escapeHtml(n)}</span>`).join('') || '<span class="muted">Waiting for first player…</span>';
     el('startBtn').disabled = names.length < 5 || names.length > 10;
     return;
   }
@@ -1865,8 +2083,9 @@ function render() {
   }
 
   if (phase === 'gameover') {
-    el('gameOverBanner').style.display = 'block';
-    el('gameOverBanner').textContent = `${currentMeta.winner === 'liberal' ? 'Liberals' : 'Fascists'} win! (${currentMeta.winReason})`;
+    // The win takeover is the game-over UI; the old full-page banner is
+    // retired (kept hidden for compat) so the two can't stack.
+    el('gameOverBanner').style.display = 'none';
     // Re-assert win takeover on refresh (endGame already showed it live).
     try {
       const winEl = el('winTakeover');
@@ -1943,32 +2162,38 @@ function fitStage() {
 }
 
 // Board overlay geometry — tile/tracker positions as % of the board image,
-// calibrated from the PNGs (dotted-zone runs + pip-ring centroids, Sep 2026).
-// All three fascist variants share identical track geometry.
-const TILE_TOP_PCT = 30.5; // top edge of policy tiles (both boards)
-const TILE_ASPECT = 320 / 397; // tile-liberal/fascist.png w/h
-const LIB_SLOT_LEFT = [17.81, 30.94, 43.44, 56.56, 71.5];
-const LIB_SLOT_WIDTH = [12.5, 12.5, 12.5, 12.5, 14.5]; // slot 5 covers the dove panel
-const FASC_SLOT_LEFT = [10.6, 24.75, 37.9, 50.4, 62.85, 75.45];
-const FASC_SLOT_WIDTH = 13;
-const TRACKER_PIP_X = [36.25, 44.94, 53.59, 62.28];
-const TRACKER_PIP_Y = 79.39;
+// measured from the PNGs (light-box runs + dotted divider gaps, Sep 2026).
+// Liberal dotted box: x 15.76–70.44 split into 4 dotted slots at pitch ~13.7;
+// slot 5 continues the pitch over the dove panel. Fascist peach box runs
+// 8.89–49.83 (slots 1–3); slots 4–6 continue the same pitch over the power
+// panels. All three fascist variants share this track geometry (verified).
+// Tile height почти fills the box: width 12.9% × board aspect ÷ tile aspect
+// ≈ 50.5% of board height, so TOP sits just inside the box top edge.
+const LIB_TILE_TOP_PCT = 24.5; // liberal dotted-box top edge (23.87) + inset
+const FASC_TILE_TOP_PCT = 25.4; // fascist peach-box top edge (24.86) + inset
+const TILE_ASPECT = 0.713; // real tiles: liberal 189/266, fascist 194/271
+const LIB_SLOT_LEFT = [16.0, 29.7, 43.5, 57.2, 70.9];
+const LIB_SLOT_WIDTH = 12.9; // uniform: slot 5 matches the slot pitch now
+const FASC_SLOT_LEFT = [9.1, 22.9, 36.6, 50.4, 64.1, 77.8];
+const FASC_SLOT_WIDTH = [12.9, 12.9, 12.9, 12.9, 12.9, 12.4]; // slot 6 inset from frame
+const TRACKER_PIP_X = [35.25, 44.6, 53.9, 63.3];
+const TRACKER_PIP_Y = 83.5;
 
 // Build overlay divs once per layer, then flip .filled/.lit per render.
 // Pure function of currentMeta — no new Firebase reads.
 function paintBoardOverlays() {
-  paintTileLayer('liberalTiles', LIB_SLOT_LEFT, LIB_SLOT_WIDTH, 'liberal', currentMeta.liberalTrack || 0);
-  paintTileLayer('fascistTiles', FASC_SLOT_LEFT, FASC_SLOT_WIDTH, 'fascist', currentMeta.fascistTrack || 0);
+  paintTileLayer('liberalTiles', LIB_SLOT_LEFT, LIB_SLOT_WIDTH, 'liberal', currentMeta.liberalTrack || 0, LIB_TILE_TOP_PCT);
+  paintTileLayer('fascistTiles', FASC_SLOT_LEFT, FASC_SLOT_WIDTH, 'fascist', currentMeta.fascistTrack || 0, FASC_TILE_TOP_PCT);
   paintTrackerPips(currentMeta.electionTracker || 0);
 }
 
-function paintTileLayer(layerId, lefts, widths, kind, filled) {
+function paintTileLayer(layerId, lefts, widths, kind, filled, topPct) {
   const layer = el(layerId);
   if (!layer) return;
   const w = i => (Array.isArray(widths) ? widths[i] : widths);
   if (layer.childElementCount !== lefts.length) {
     layer.innerHTML = lefts.map((left, i) =>
-      `<div class="tile-spot" style="left:${left}%;width:${w(i)}%;top:${TILE_TOP_PCT}%;aspect-ratio:${TILE_ASPECT}"><img src="img/tile-${kind}.png" alt="${kind} policy" draggable="false" loading="lazy" /></div>`
+      `<div class="tile-spot" style="left:${left}%;width:${w(i)}%;top:${topPct}%;aspect-ratio:${TILE_ASPECT}"><img src="img/tile-${kind}.png" alt="${kind} policy" draggable="false" loading="lazy" /></div>`
     ).join('');
   }
   // While a tile is in flight, its slot stays empty with a pulsing outline —
@@ -1982,6 +2207,11 @@ function paintTileLayer(layerId, lefts, widths, kind, filled) {
 }
 
 function paintTrackerPips(tracker) {
+  const pill = el('trackerPill');
+  if (pill) {
+    pill.textContent = tracker >= 2 ? `Tracker ${tracker}/3 — chaos next!` : `Tracker ${tracker}/3`;
+    pill.classList.toggle('danger', tracker >= 2);
+  }
   const layer = el('trackerPips');
   if (!layer) return;
   if (layer.childElementCount !== TRACKER_PIP_X.length) {
