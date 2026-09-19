@@ -25,6 +25,8 @@ let investigatePaintedFor = null; // roundId options painted (result box owned b
 let peekPaintedFor = null; // roundId peek tiles painted (live listener owns repaints)
 let lastPingKey = null; // your-turn ping fires once per action (render() re-runs on every update)
 let winPlayedFor = null; // gameover stinger fires once per result
+let execPlayedFor = null; // victim execution scare fires once per death
+let lastAliveKey = null; // witness flash: tracks dead-uid set across renders
 const REDUCED_MOTION = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const FLIP_MS = REDUCED_MOTION ? 0 : 900;
 
@@ -261,6 +263,8 @@ function render() {
     // next game repaints instead of trusting the previous game's flags.
     presidentDrawDoneFor = presidentDrawInflightFor = investigatePaintedFor = peekPaintedFor = null;
     renderedForRound = {};
+    execPlayedFor = null;
+    lastAliveKey = null;
     el('main').innerHTML = `<div class="role-banner ${currentMeta.winner}">
       ${currentMeta.winner === 'liberal' ? 'Liberals' : 'Fascists'} win!</div>`;
     return;
@@ -285,13 +289,14 @@ function render() {
 
   if (currentPlayers[myUid] && currentPlayers[myUid].alive === false) {
     dropLiveSubs();
-    el('main').innerHTML = `
-      <div class="role-banner dead">You have been executed.</div>
-      <div class="dead-stamp">EXECUTED</div>
-      <p class="muted">You are out of the game — sit back and watch. ${escapeHtml(describeWhosTurn())}</p>
-    `;
+    renderExecuted();
     return;
   }
+
+  // Witness flash: someone else just died (dead-uid set grew while we stayed
+  // alive). Living phones get a brief red edge flash + execution sound — no
+  // shake, no stamp, no scream. First render seeds the baseline silently.
+  watchExecutionWitness();
 
   if (phase === 'nomination' && currentMeta.presidentUid === myUid && !currentMeta.chancellorCandidateUid) {
     renderNomination();
@@ -339,6 +344,62 @@ function render() {
   }
 
   renderIdle();
+}
+
+// Victim execution scare: full-screen red flash + shake + BANG + EXECUTED
+// stamp slam + LOUD scream from the victim's own phone, then settles into
+// the static dead end-state. Fires once per death (execPlayedFor); reduced
+// motion skips straight to the end-state with no scare and no scream.
+// Scream obeys the mute toggle and mobile autoplay rules (playSound drops
+// pre-gesture calls silently) — visual-only until audio unlocks.
+function renderExecuted() {
+  el('main').innerHTML = `
+    <div class="role-banner dead">You have been executed.</div>
+    <div class="dead-stamp">EXECUTED</div>
+    <p class="muted">You are out of the game — sit back and watch. ${escapeHtml(describeWhosTurn())}</p>
+  `;
+  if (execPlayedFor === myUid) return;
+  execPlayedFor = myUid;
+  if (REDUCED_MOTION) return;
+  const scare = document.createElement('div');
+  scare.className = 'exec-scare shake show';
+  scare.setAttribute('role', 'alert');
+  scare.innerHTML = `
+    <div class="exec-scare-flash"></div>
+    <p class="exec-bang">BANG</p>
+    <div class="exec-scare-stamp">EXECUTED</div>
+    <p class="exec-scare-sub">You have been executed</p>
+  `;
+  document.body.appendChild(scare);
+  playSound('scream', { volume: 1 });
+  try { if (navigator.vibrate) navigator.vibrate([120, 60, 200]); } catch (_) {}
+  setTimeout(() => scare.remove(), 2200);
+}
+
+// Witness flash: track the dead-uid set across renders. When it grows while
+// we are alive, someone else just died — brief red edge flash + execution
+// sound on our phone (no shake/stamp/scream; those are victim-only).
+function watchExecutionWitness() {
+  const key = Object.keys(currentPlayers || {})
+    .filter(uid => currentPlayers[uid] && currentPlayers[uid].alive === false)
+    .sort()
+    .join(',');
+  if (lastAliveKey === null) {
+    lastAliveKey = key; // first render: seed baseline, no flash
+    return;
+  }
+  if (key !== lastAliveKey) {
+    const grew = key.length > lastAliveKey.length;
+    lastAliveKey = key;
+    if (!grew || REDUCED_MOTION) return;
+    try {
+      document.body.classList.remove('exec-witness');
+      void document.body.offsetWidth; // restart the animation
+      document.body.classList.add('exec-witness');
+      setTimeout(() => document.body.classList.remove('exec-witness'), 900);
+    } catch (_) {}
+    playSound('execution');
+  }
 }
 
 function renderRoleGate() {

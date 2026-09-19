@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<!-- DEV-ONLY animations preview — DELETE before game night.
+     Static mock of play.html / js/play.js animation paths (phone player view),
+     no Firebase: pick an animation + device width + motion mode to feel each
+     phone motion. Markup mirrors the render*() functions in js/play.js (marked
+     MIRROR); styling is the real css/style.css, so what you see is honest.
+     Tell us which ones to keep/tune and we'll move them into play.js/style.css. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>Secret Hitler — Animations Preview (dev only)</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  :root { --flip-dur: 900ms; }
+  /* Preview rail: fixed left, stage shifts right so nothing is covered. */
+  #previewRail {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 264px;
+    overflow-y: auto; z-index: 80; background: rgba(22,24,28,.97);
+    border-right: 2px solid var(--accent); padding: 12px; margin: 0;
+  }
+  #previewRail h3 { margin: 6px 0 8px; font-size: 15px; }
+  #previewRail .row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  #previewRail .row button { padding: 8px 6px; font-size: 13px; margin: 0; width: auto; flex: 1 1 auto; }
+  #previewRail .row button.active { outline: 2px solid #fff; }
+  #previewRail label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 2px; }
+  #previewReadout {
+    font-family: monospace; font-size: 12px; background: #111;
+    border-radius: 6px; padding: 8px; margin-top: 10px; white-space: pre-wrap;
+  }
+  #animMeta {
+    font-family: monospace; font-size: 12px; background: #111;
+    border-radius: 6px; padding: 8px; margin-top: 8px; white-space: pre-wrap;
+    border: 1px dashed var(--border);
+  }
+  /* Device frame: constrains the mock to a phone/tablet width. */
+  #stage { padding: 16px; }
+  #deviceFrame {
+    margin: 0 auto;
+    border: 2px solid #444;
+    border-radius: 24px;
+    overflow: hidden;
+    position: relative;
+    transform: translateZ(0);
+    background: var(--bg);
+  }
+  #deviceFrame .notch {
+    text-align: center; font-size: 11px; color: var(--muted);
+    padding: 4px 0 0; letter-spacing: 0.1em;
+  }
+  @media (min-width: 900px) {
+    body.pa-preview #stage { padding-left: 280px; }
+  }
+  @media (max-width: 500px) {
+    #stage { padding: 0; }
+    #deviceFrame { border-radius: 0; border-left: none; border-right: none; }
+    #deviceFrame .notch { display: none; }
+  }
+  body.pa-preview.tools-hidden #previewRail { display: none; }
+  @media (min-width: 501px) {
+    body.pa-preview.tools-hidden #stage { padding-left: 16px; }
+  }
+
+  /* --- Motion lab overrides (preview-only) --- */
+  /* Flip duration is driven by --flip-dur so the slider is honest. */
+  #deviceFrame .flip-inner { transition-duration: var(--flip-dur); }
+  /* Slow-mo: 4x durations so jank / flash shape is reviewable. */
+  body.slowmo #deviceFrame .flip-inner { transition-duration: calc(var(--flip-dur) * 4); }
+  body.slowmo #deviceFrame .role-banner,
+  body.slowmo #deviceFrame .waiting,
+  body.slowmo #deviceFrame .flip-scene.tappable:not(.revealed),
+  body.slowmo #deviceFrame .classified-stamp,
+  body.slowmo #deviceFrame .tile-spot.filled img,
+  body.slowmo #deviceFrame .seat.voted .vote-dot {
+    animation-duration: 4s !important;
+  }
+  /* Force-reduce: kill all phone motion in the frame (mirrors FLIP_MS=0). */
+  body.reduced #deviceFrame *,
+  body.reduced #deviceFrame *::before,
+  body.reduced #deviceFrame *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  body.reduced #deviceFrame .classified-stamp { opacity: 0.85; }
+  /* Force-allow: re-enable key phone motions even under OS reduce. */
+  body.full-motion #deviceFrame .flip-inner { transition: transform var(--flip-dur) ease !important; }
+  body.full-motion #deviceFrame .role-banner { animation: banner-in 0.5s ease-out !important; }
+  body.full-motion #deviceFrame .waiting { animation: waiting-pulse 1.5s ease-in-out infinite !important; }
+  body.full-motion #deviceFrame .flip-scene.tappable:not(.revealed) { animation: hint-pulse 2s ease-in-out infinite !important; }
+  body.full-motion #deviceFrame .classified-stamp { animation: classified-fade 1.5s ease-out forwards !important; }
+
+  .pa-card { border: 1px dashed var(--border); border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .pa-card h3 { margin: 0 0 6px; font-size: 14px; }
+  .pa-card .replay-row { display: flex; gap: 8px; margin-top: 10px; }
+  .pa-card .replay-row button { width: auto; padding: 8px 12px; font-size: 12px; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); background: none; border: none; box-shadow: none; padding: 0; }
+  .touch-check { outline: 2px dashed #ff5500 !important; outline-offset: 2px; }
+</style>
+</head>
+<body class="play-view pa-preview">
+  <aside id="previewRail">
+    <h3>Animations preview (dev only)</h3>
+    <label>Device width</label>
+    <div class="row" id="widthRow">
+      <button data-w="390" class="active">Phone 390</button>
+      <button data-w="768">Tablet 768</button>
+      <button data-w="full">Full</button>
+    </div>
+    <label>Animation</label>
+    <div class="row" id="animRow" style="flex-direction:column">
+      <button data-a="role-flip">role flip (night reveal)</button>
+      <button data-a="reveal-flash">reveal flash lib/fasc</button>
+      <button data-a="policy-pres">policy pres (3 tiles)</button>
+      <button data-a="policy-chan">policy chan (2 tiles)</button>
+      <button data-a="ballot">ballot Ja/Nein</button>
+      <button data-a="veto">veto buttons</button>
+      <button data-a="investigate">investigate result</button>
+      <button data-a="powers">power headers</button>
+      <button data-a="dead">dead stamp + banner</button>
+      <button data-a="exec-scare" class="active">execution scare (victim)</button>
+      <button data-a="gameover">gameover banner</button>
+      <button data-a="waiting">waiting + hint loops</button>
+      <button data-a="menu">role menu open/close</button>
+    </div>
+    <label>Role (tints flash / menu)</label>
+    <div class="row" id="roleRow">
+      <button data-r="liberal">Liberal</button>
+      <button data-r="fascist" class="active">Fascist</button>
+      <button data-r="hitler">Hitler</button>
+    </div>
+    <label>Motion</label>
+    <div class="row" id="motionRow">
+      <button data-m="system" class="active">System</button>
+      <button data-m="reduced">Force-reduce</button>
+      <button data-m="full">Force-allow</button>
+    </div>
+    <div class="row">
+      <button id="slowmoBtn">slow-mo: off</button>
+      <button id="touchBtn">touch targets: off</button>
+    </div>
+    <label>Flip duration (<span id="durLabel">900</span>ms, mirrors FLIP_MS)</label>
+    <input type="range" id="durSlider" min="0" max="1500" step="50" value="900" />
+    <div class="row">
+      <button id="replayBtn">↻ Replay (R)</button>
+      <button id="toolsToggle">hide tools (H)</button>
+    </div>
+    <div id="previewReadout">…</div>
+    <div id="animMeta">…</div>
+    <p class="muted">Frame simulates width only — media queries follow the real window, so also resize / use devtools device toolbar. URL: ?animation=ballot&amp;width=390&amp;role=fascist&amp;motion=reduced&amp;slowmo=1&amp;dur=900&amp;tools=hidden</p>
+  </aside>
+
+  <div id="stage">
+    <div id="deviceFrame" style="max-width:390px">
+      <div class="notch">PREVIEW</div>
+      <!-- MIRROR of play.html body (same structure, static demo content). -->
+      <div class="board-wrap" style="max-width:480px">
+        <p class="muted" id="paStatus"></p>
+        <div class="play-topbar">
+          <button id="paSoundBtn" class="sound-toggle" type="button">🔊 Sound on</button>
+          <button id="paRoleMenuBtn" class="sound-toggle" type="button">🎴 My role</button>
+        </div>
+        <p class="muted" id="paPin" style="display:block">Your reconnect code: 4821 — save it in case you need to rejoin from another device.</p>
+        <div id="paMain"></div>
+        <div class="pa-card">
+          <h3 id="paCardTitle">role flip</h3>
+          <p class="muted" id="paCardDesc"></p>
+          <div class="replay-row">
+            <button id="cardReplayBtn" type="button">↻ Replay this</button>
+          </div>
+        </div>
+      </div>
+      <!-- MIRROR of play.html #roleMenu, inside the frame so it is clipped to
+           the simulated device. No 20s autoclose here. -->
+      <div id="paRoleMenu" class="role-menu" role="dialog" aria-modal="true" aria-label="Your secret role" style="display:none">
+        <div class="role-menu-sheet">
+          <button id="paRoleMenuClose" class="sound-toggle role-menu-close" type="button">✕ Close</button>
+          <div id="paRoleMenuBody"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// MIRROR of play.js animation paths (static demo data, no Firebase).
+var NAMES = ['Anja', 'Boris', 'Clara', 'Dmitri', 'Elsa'];
+var ROLES = {
+  liberal: { img: 'role-liberal', label: 'Liberal', mates: [] },
+  fascist: { img: 'role-fascist', label: 'Fascist', mates: ['Boris', 'Clara'] },
+  hitler: { img: 'role-hitler', label: 'Hitler', mates: ['Boris'] }
+};
+var anim = 'exec-scare';
+var role = 'fascist';
+var slowmo = false;
+var flipDur = 900; // mirrors FLIP_MS in play.js (0 when reduced)
+
+function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function isReduced() { return document.body.classList.contains('reduced'); }
+function effDur() { return isReduced() ? 0 : flipDur * (slowmo ? 4 : 1); }
+
+// MIRROR of policyFlipTile(t, i) in play.js — starts facedown.
+function flipTile(t, i) {
+  return '<div class="policy-tile flip-scene tappable" data-idx="' + i + '" data-demo="tile">' +
+    '<div class="flip-inner flipped">' +
+    '<img class="policy-tile-img flip-face" src="img/tile-' + t + '.png" alt="' + t + ' policy" />' +
+    '<img class="policy-tile-img flip-face flip-back" src="img/back-tile.png" alt="Facedown policy — tap to peek" />' +
+    '</div></div>';
+}
+// MIRROR of renderRoleGate()/renderIdle() unrevealed in play.js.
+function roleScene(r) {
+  return '<div class="flip-scene center tappable" id="demoRoleScene">' +
+    '<div class="flip-inner flipped" id="demoRoleFlip">' +
+    '<img class="role-img flip-face" src="img/' + ROLES[r].img + '.png" alt="' + ROLES[r].label + '" />' +
+    '<img class="role-img flip-face flip-back" src="img/back-role.png" alt="Your secret role — tap to reveal" />' +
+    '</div>' +
+    '<div class="classified-stamp" aria-hidden="true">CLASSIFIED</div></div>';
+}
+// MIRROR of roleMenuHtml() in js/play.js. Keep in sync or scripts/check-role-menu.js fails.
+function roleMenuHtml() {
+  var label = role === 'hitler' ? 'Hitler' : role[0].toUpperCase() + role.slice(1);
+  var img = role === 'hitler' ? 'role-hitler' : 'role-' + role;
+  var mates = ROLES[role].mates || [];
+  var team;
+  if (mates.length) {
+    team = '<p class="role-menu-team">' + (role === 'hitler' ? 'Your Fascists' : 'Your allies') + '</p>' +
+      '<p class="role-menu-names">' + mates.map(esc).join('<br />') + '</p>' +
+      '<p class="muted">Fascists and Hitler. The app lists them together — it does not mark which is Hitler.</p>';
+  } else {
+    team = '<p class="muted">You know nobody. Read the table, not the cards.</p>';
+  }
+  return '<img class="role-img" src="img/' + img + '.png" alt="' + label + '" />' +
+    '<p class="role-caption">' + label + '</p>' + team +
+    '<p class="role-menu-shield">Shield your screen</p>';
+}
+
+var ANIMS = {
+  'role-flip': { status: 'Phase: night', title: 'role flip (night reveal)',
+    desc: 'MIRROR renderRoleGate: hint-pulse + classified-fade + flip .9s + faction flash. Tap card to replay. Reduced: instant (FLIP_MS=0), no flash.',
+    comp: 'transform (flip) = compositor-friendly; flash = opacity-only overlay, cheap.',
+    html: function () { return roleScene(role) + '<p class="role-caption">Tap to reveal your role — shield your screen</p><p>Night falls — reveal your role, then hide it again.</p>'; } },
+  'reveal-flash': { status: 'Phase: night', title: 'reveal flash lib/fasc',
+    desc: 'MIRROR flashFactionReveal(): body.reveal-liberal/fascist ::after 0.9s opacity-only. Both tints shown; tap card flips too. Reduced: no flash.',
+    comp: 'opacity-only overlay = cheap (was box-shadow flood, now fixed).',
+    html: function () { return roleScene(role) + '<p class="role-caption">Flash fires on reveal — pick a role in the rail to compare tints</p>'; } },
+  'policy-pres': { status: 'Phase: legislative_president', title: 'policy pres (3 tiles)',
+    desc: 'MIRROR renderPresidentDraw: tap once to peek (flip), tap again to discard. Reduced: instant flip.',
+    comp: 'transform only; cheap.',
+    html: '<h2>Discard one policy</h2><p class="muted">Tap a card to peek, tap again to discard it. The remaining two go to the Chancellor.</p><div class="policy-choice">' + flipTile('fascist', 0) + flipTile('liberal', 1) + flipTile('fascist', 2) + '</div>' },
+  'policy-chan': { status: 'Phase: legislative_chancellor', title: 'policy chan (2 tiles)',
+    desc: 'MIRROR renderChancellorHand: same two-tap; plus veto button. Reduced: instant.',
+    comp: 'transform only; cheap.',
+    html: '<h2>Enact one policy</h2><p class="muted">Tap a card to peek, tap again to enact it. The other is discarded, unseen.</p><div class="policy-choice">' + flipTile('liberal', 0) + flipTile('fascist', 1) + '</div><button type="button">I wish to veto this agenda</button>' },
+  'ballot': { status: 'Phase: election', title: 'ballot Ja/Nein',
+    desc: 'MIRROR renderVoting/playBallot: tap plays facedown with flip, other disabled, vote lands after FLIP_MS. Reduced: instant record.',
+    comp: 'transform only; cheap. NOTE: real app shows back first — here front shows until tapped, same as preview-play.',
+    html: '<h2>Anja nominates Boris</h2><div class="vote-frame"><div class="vote-frame-header">Cast Your Vote</div><div class="vote-buttons">' +
+      '<button class="ballot ja" id="demoJa"><div class="flip-scene"><div class="flip-inner" id="demoJaFlip"><img src="img/ballot-ja.png" alt="Ja!" class="flip-face" /><img src="img/back-ballot.png" alt="" class="flip-face flip-back" /></div></div></button>' +
+      '<button class="ballot nein" id="demoNein"><div class="flip-scene"><div class="flip-inner" id="demoNeinFlip"><img src="img/ballot-nein.png" alt="Nein!" class="flip-face" /><img src="img/back-ballot.png" alt="" class="flip-face flip-back" /></div></div></button>' +
+      '</div></div>' },
+  'veto': { status: 'Phase: legislative_chancellor', title: 'veto consent',
+    desc: 'MIRROR renderVetoConsent: static tiles + agree/refuse buttons. No keyframes — button press transition only. Included so you can approve/disapprove adding motion here.',
+    comp: 'no animation today; cheap.',
+    html: '<h2>Chancellor wishes to veto</h2><p class="muted">Agree to discard both policies (tracker +1), or refuse and they must enact one.</p><div class="policy-choice"><img class="policy-tile policy-tile-img" src="img/tile-liberal.png" alt="liberal policy" /><img class="policy-tile policy-tile-img" src="img/tile-fascist.png" alt="fascist policy" /></div><div class="vote-buttons"><button type="button">I agree to the veto</button><button type="button" id="vetoRefuseBtn">Refuse — enact a policy</button></div>' },
+  'investigate': { status: 'Phase: executive_action', title: 'investigate result',
+    desc: 'MIRROR renderInvestigate: options, then loyalty card auto-flips in via double-rAF. Tap a name to demo arrival.',
+    comp: 'transform only; cheap.',
+    html: '<div class="power-header investigate"><img class="power-icon" src="img/icon-investigate.png" alt="" /><span>Investigate Loyalty</span></div><p class="muted">Pick a player to learn whether they are Liberal or Fascist.</p><div id="demoInvestOpts"><button type="button" class="investigateBtn" data-n="Boris">Boris</button><button type="button" class="investigateBtn" data-n="Clara">Clara</button><button type="button" class="investigateBtn" data-n="Dmitri">Dmitri</button></div><div id="demoInvestResult"></div>' },
+  'powers': { status: 'Phase: executive_action', title: 'power headers',
+    desc: 'MIRROR renderExecution/Special/Peek headers: static dossier banners, no keyframes. Included to approve/disapprove adding an entrance motion.',
+    comp: 'static; cheap.',
+    html: '<div class="power-header execution"><img class="power-icon" src="img/icon-execution.png" alt="" /><span>Choose a player to execute</span></div><button type="button" class="executeBtn">Boris</button><button type="button" class="executeBtn">Clara</button><div class="power-header special"><img class="power-icon" src="img/icon-special-election.png" alt="" /><span>Special Election</span></div><div class="power-header peek"><img class="power-icon" src="img/icon-peek.png" alt="" /><span>Policy Peek</span></div>' },
+  'dead': { status: 'Phase: nomination', title: 'dead stamp + banner',
+    desc: 'MIRROR render() dead: role-banner.dead banner-in .5s scale .92→1 + static EXECUTED stamp (rotate -12deg, no keyframes). Watch 390px clipping.',
+    comp: 'banner-in transform+opacity = cheap; stamp static.',
+    html: '<div class="role-banner dead">You have been executed.</div><div class="dead-stamp">EXECUTED</div><p class="muted">You are out of the game — sit back and watch. Boris is nominating a Chancellor.</p>' },
+  'exec-scare': { status: 'Phase: nomination (you were executed)', title: 'execution scare (victim)',
+    desc: 'MIRROR renderExecuted() in play.js: full-screen red flash + shake + BANG + EXECUTED stamp slam + scream. Tap “Play scare” (sound needs a tap to unlock). Reduced: skips straight to the dead end-state, no scream.',
+    comp: 'transform/opacity only = cheap. Scream obeys mute; silent until first tap unlocks audio.',
+    html: '<div class="role-banner dead">You have been executed.</div><div class="dead-stamp">EXECUTED</div><p class="muted">Demo: the scare plays over this end-state.</p><div class="replay-row" style="display:flex;gap:8px;margin-top:10px"><button type="button" id="demoScareBtn" style="width:auto;padding:8px 12px;font-size:12px">▶ Play scare</button><button type="button" id="demoScreamBtn" style="width:auto;padding:8px 12px;font-size:12px">🔊 Play scream</button></div>' },
+  'gameover': { status: 'Phase: gameover', title: 'gameover banner',
+    desc: 'MIRROR render() gameover: role-banner.liberal banner-in .5s + win stinger. No other phone motion (board confetti is TV-only).',
+    comp: 'banner-in cheap; audio only otherwise.',
+    html: '<div class="role-banner liberal">Liberals win!</div>' },
+  'waiting': { status: 'Phase: nomination', title: 'waiting + hint loops',
+    desc: 'waiting-pulse 1.5s (vote cast / loading) + hint-pulse 2s (tappable glow). Both infinite; both currently MISSING a reduced-motion kill — force-reduce shows the fix.',
+    comp: 'opacity/box-shadow loops = keep; reduce must silence.',
+    html: '<p class="muted waiting">Vote cast. Waiting for everyone else...</p>' + roleScene(role) },
+  'menu': { status: 'Phase: nomination', title: 'role menu open/close',
+    desc: 'MIRROR open/closeRoleMenu: display flex/none, DOM emptied on close, backdrop+Esc to dismiss. No CSS transition today — approve/disapprove adding a fade/slide.',
+    comp: 'no animation today; a fade would be opacity-only (cheap).',
+    html: '<h2>Nominate a Chancellor</h2><button type="button" class="nominateBtn">Boris</button><button type="button" class="nominateBtn">Clara</button><p class="muted">Tap “🎴 My role” above — the overlay is clipped to the phone frame.</p>' }
+};
+
+function openRoleMenu() {
+  document.getElementById('paRoleMenuBody').innerHTML = roleMenuHtml();
+  document.getElementById('paRoleMenu').style.display = 'flex';
+}
+function closeRoleMenu() {
+  document.getElementById('paRoleMenu').style.display = 'none';
+  document.getElementById('paRoleMenuBody').innerHTML = '';
+}
+document.getElementById('paRoleMenuBtn').addEventListener('click', openRoleMenu);
+document.getElementById('paRoleMenuClose').addEventListener('click', closeRoleMenu);
+document.getElementById('paRoleMenu').addEventListener('click', function (e) { if (e.target === this) closeRoleMenu(); });
+window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeRoleMenu(); });
+
+function flashFaction(r) {
+  try {
+    var cls = r === 'liberal' ? 'reveal-liberal' : 'reveal-fascist';
+    document.body.classList.remove('reveal-liberal', 'reveal-fascist');
+    void document.body.offsetWidth;
+    document.body.classList.add(cls);
+    setTimeout(function () { document.body.classList.remove(cls); }, slowmo ? 3800 : 950);
+  } catch (_) {}
+}
+
+function render() {
+  var def = ANIMS[anim];
+  if (anim === 'menu') openRoleMenu(); else closeRoleMenu();
+  document.querySelectorAll('.exec-scare.demo-scare').forEach(function (n) { n.remove(); });
+  document.body.classList.remove('exec-witness');
+  document.getElementById('paStatus').textContent = def.status;
+  document.getElementById('paCardTitle').textContent = def.title;
+  document.getElementById('paCardDesc').textContent = def.desc;
+  document.getElementById('paMain').innerHTML = typeof def.html === 'function' ? def.html() : def.html;
+  bindDemo();
+  if (anim === 'exec-scare' && !isReduced()) playDemoScare(false);
+  readout();
+}
+
+// Demo version of the victim execution scare (MIRROR of renderExecuted()).
+// Overlay lives in #deviceFrame so it is clipped to the simulated phone.
+function playDemoScare(withSound) {
+  document.querySelectorAll('.exec-scare.demo-scare').forEach(function (n) { n.remove(); });
+  if (isReduced()) return;
+  var frame = document.getElementById('deviceFrame');
+  var scare = document.createElement('div');
+  scare.className = 'exec-scare demo-scare shake show';
+  scare.innerHTML = '<div class="exec-scare-flash"></div>' +
+    '<p class="exec-bang">BANG</p>' +
+    '<div class="exec-scare-stamp">EXECUTED</div>' +
+    '<p class="exec-scare-sub">Demo scare — the game shows this once on the victim phone</p>';
+  frame.appendChild(scare);
+  if (withSound) playDemoScream();
+  try { if (navigator.vibrate) navigator.vibrate(200); } catch (_) {}
+  setTimeout(function () { scare.remove(); }, slowmo ? 6000 : 2200);
+}
+function playDemoScream() {
+  try {
+    var a = new Audio('snd/scream.mp3');
+    a.volume = 1;
+    var p = a.play();
+    if (p && typeof p.then === 'function') p.catch(function () {});
+  } catch (_) {}
+}
+
+function bindDemo() {
+  var main = document.getElementById('paMain');
+  var rs = document.getElementById('demoRoleScene');
+  if (rs) rs.addEventListener('click', function () {
+    rs.classList.add('revealed');
+    document.getElementById('demoRoleFlip').classList.remove('flipped');
+    if (!isReduced()) flashFaction(role);
+    setTimeout(function () {}, effDur());
+  });
+  main.querySelectorAll('[data-demo="tile"] .flip-inner.flipped').forEach(function (inner) {
+    inner.parentElement.addEventListener('click', function () { inner.classList.remove('flipped'); });
+  });
+  var ja = document.getElementById('demoJa'), nein = document.getElementById('demoNein');
+  if (ja && nein) {
+    ja.addEventListener('click', function () {
+      document.getElementById('demoJaFlip').classList.add('flipped');
+      nein.setAttribute('disabled', '');
+      setTimeout(function () { main.insertAdjacentHTML('beforeend', '<p class="muted">Vote Ja recorded (demo).</p>'); }, effDur());
+    });
+    nein.addEventListener('click', function () {
+      document.getElementById('demoNeinFlip').classList.add('flipped');
+      ja.setAttribute('disabled', '');
+      setTimeout(function () { main.insertAdjacentHTML('beforeend', '<p class="muted">Vote Nein recorded (demo).</p>'); }, effDur());
+    });
+  }
+  var opts = document.getElementById('demoInvestOpts');
+  if (opts) opts.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    opts.innerHTML = '<p class="muted">Investigating ' + esc(b.dataset.n) + '...</p>';
+    setTimeout(function () {
+      document.getElementById('demoInvestResult').innerHTML =
+        '<div class="flip-scene center"><div class="flip-inner flipped" id="demoInvestFlip">' +
+        '<img class="role-img flip-face" src="img/role-fascist.png" alt="fascist" />' +
+        '<img class="role-img flip-face flip-back" src="img/back-role.png" alt="" />' +
+        '</div></div>';
+      if (!isReduced()) {
+        requestAnimationFrame(function () { requestAnimationFrame(function () {
+          var f = document.getElementById('demoInvestFlip');
+          if (f) f.classList.remove('flipped');
+        }); });
+      } else {
+        var f2 = document.getElementById('demoInvestFlip');
+        if (f2) f2.classList.remove('flipped');
+      }
+    }, isReduced() ? 0 : (slowmo ? 1200 : 300));
+  });
+  var scareBtn = document.getElementById('demoScareBtn');
+  if (scareBtn) scareBtn.addEventListener('click', function () { playDemoScare(true); });
+  var screamBtn = document.getElementById('demoScreamBtn');
+  if (screamBtn) screamBtn.addEventListener('click', playDemoScream);
+}
+
+function readout() {
+  var frame = document.getElementById('deviceFrame');
+  var fw = Math.round(frame.getBoundingClientRect().width);
+  var over = document.documentElement.scrollWidth > window.innerWidth + 1;
+  var motion = document.body.classList.contains('reduced') ? 'force-reduce' : (document.body.classList.contains('full-motion') ? 'force-allow' : 'system');
+  document.getElementById('previewReadout').textContent =
+    'anim ' + anim + ' · role ' + role + ' · motion ' + motion + (slowmo ? ' · slow-mo 0.25x' : '') + '\n' +
+    'frame ' + fw + 'px · viewport ' + window.innerWidth + 'x' + window.innerHeight + '\n' +
+    (over ? 'H-OVERFLOW: page scrolls sideways!' : 'no page-level h-overflow');
+  var def = ANIMS[anim];
+  document.getElementById('animMeta').textContent =
+    'duration ' + effDur() + 'ms (slider ' + flipDur + 'ms)' + '\n' + def.comp;
+}
+
+// Rail wiring
+document.getElementById('animRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  anim = b.dataset.a;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  render();
+});
+document.getElementById('roleRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  role = b.dataset.r;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  render();
+});
+document.getElementById('widthRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  document.getElementById('deviceFrame').style.maxWidth = b.dataset.w === 'full' ? 'none' : b.dataset.w + 'px';
+  readout();
+});
+document.getElementById('motionRow').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
+  document.body.classList.toggle('reduced', b.dataset.m === 'reduced');
+  document.body.classList.toggle('full-motion', b.dataset.m === 'full');
+  render();
+});
+document.getElementById('slowmoBtn').addEventListener('click', function () {
+  slowmo = !slowmo;
+  document.body.classList.toggle('slowmo', slowmo);
+  this.textContent = slowmo ? 'slow-mo: 0.25x' : 'slow-mo: off';
+  this.classList.toggle('active', slowmo);
+  readout();
+});
+document.getElementById('touchBtn').addEventListener('click', function () {
+  var on = this.textContent.indexOf('off') !== -1;
+  this.textContent = on ? 'touch targets: on' : 'touch targets: off';
+  this.classList.toggle('active', on);
+  document.getElementById('paMain').querySelectorAll('button').forEach(function (btn) {
+    var r = btn.getBoundingClientRect();
+    btn.classList.toggle('touch-check', on && (r.height < 44 || r.width < 44));
+  });
+});
+document.getElementById('durSlider').addEventListener('input', function () {
+  flipDur = Number(this.value);
+  document.getElementById('durLabel').textContent = String(flipDur);
+  document.documentElement.style.setProperty('--flip-dur', flipDur + 'ms');
+  readout();
+});
+function doReplay() { render(); }
+document.getElementById('replayBtn').addEventListener('click', doReplay);
+document.getElementById('cardReplayBtn').addEventListener('click', doReplay);
+function setToolsHidden(hidden) {
+  document.body.classList.toggle('tools-hidden', hidden);
+  document.getElementById('toolsToggle').textContent = hidden ? 'show tools (H)' : 'hide tools (H)';
+  readout();
+}
+document.getElementById('toolsToggle').addEventListener('click', function () {
+  setToolsHidden(!document.body.classList.contains('tools-hidden'));
+});
+window.addEventListener('keydown', function (e) {
+  if ((e.key === 'h' || e.key === 'H') && !/INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) {
+    setToolsHidden(!document.body.classList.contains('tools-hidden'));
+  }
+  if ((e.key === 'r' || e.key === 'R') && !/INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) doReplay();
+});
+window.addEventListener('resize', readout);
+
+// URL params for sharing (DEV-ONLY): ?animation=ballot&width=390&role=fascist&motion=reduced&slowmo=1&dur=550&tools=hidden
+(function applyParams() {
+  var q = new URLSearchParams(location.search);
+  var a = q.get('animation');
+  if (a && ANIMS[a]) {
+    anim = a;
+    document.querySelectorAll('#animRow button').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.a === a);
+    });
+  }
+  var r = q.get('role');
+  if (r && ROLES[r]) {
+    role = r;
+    document.querySelectorAll('#roleRow button').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.r === r);
+    });
+  }
+  var m = q.get('motion');
+  if (m === 'reduced' || m === 'full' || m === 'system') {
+    document.querySelectorAll('#motionRow button').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.m === m);
+    });
+    document.body.classList.toggle('reduced', m === 'reduced');
+    document.body.classList.toggle('full-motion', m === 'full');
+  }
+  if (q.get('slowmo') === '1') document.getElementById('slowmoBtn').click();
+  var d = Number(q.get('dur'));
+  if (Number.isFinite(d) && d >= 0 && d <= 1500) {
+    document.getElementById('durSlider').value = String(d);
+    document.getElementById('durSlider').dispatchEvent(new Event('input'));
+  }
+  if (q.get('tools') === 'hidden') setToolsHidden(true);
+  var w = q.get('width');
+  if (w === '390' || w === '768' || w === 'full') {
+    document.querySelectorAll('#widthRow button').forEach(function (x) {
+      var on = x.dataset.w === w;
+      x.classList.toggle('active', on);
+      if (on) x.click();
+    });
+  }
+})();
+document.documentElement.style.setProperty('--flip-dur', flipDur + 'ms');
+render();
+</script>
+</body>
+</html>
